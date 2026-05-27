@@ -9,8 +9,7 @@ from llama_index.core import VectorStoreIndex
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core import StorageContext
-from llama_index.llms.openai import OpenAI
-
+from llama_index.llms.ollama import Ollama
 
 
 # -----------------------------
@@ -23,20 +22,16 @@ embed_model = HuggingFaceEmbedding(
 
 
 # -----------------------------
-# Hugging Face LLM
+# Local Ollama LLM
 # -----------------------------
 
-from llama_index.llms.openai import OpenAI
-
-from llama_index.llms.openai import OpenAI
-
-llm = OpenAI(
-    model="gpt-3.5-turbo",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-    api_base="https://openrouter.ai/api/v1",
+llm = Ollama(
+    model="phi3:mini",
+    request_timeout=1200.0,
+    context_window=1024,
 )
 
-
+print("LOADED MODEL: phi3:mini")
 # -----------------------------
 # ChromaDB Setup
 # -----------------------------

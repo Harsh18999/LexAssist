@@ -9,51 +9,51 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-
+from rag.query_engine import llm
 from backend.services.activity_service import log_activity
 from rag.query_engine import query_engine
+import fitz
 
 BRIEF_PROMPT = """
-You are an Indian legal AI assistant. Analyze this judgment and return ONLY valid JSON (no markdown fences).
+You are a legal AI assistant.
+
+Analyze this Indian legal judgment.
+
+Return ONLY valid JSON.
 
 {{
   "case_title": "",
   "court": "",
-  "judgment_date": "",
-  "judges": [],
-  "petitioner": "",
-  "respondent": "",
-  "acts_involved": [],
-  "constitutional_articles": [],
-  "case_overview": "",
-  "important_facts": [],
-  "legal_issues": [],
-  "arguments": [],
-  "court_observations": [],
-  "precedents": [],
-  "final_verdict": "",
-  "key_takeaways": [],
-  "simplified_explanation": "",
-  "risk_tags": [],
-  "key_legal_issues": [],
-  "important_observations": [],
-  "summary": ""
+  "summary": "",
+  "final_verdict": ""
 }}
 
-Use "Not clearly mentioned" for missing strings. Use [] if unknown.
-LEGAL DOCUMENT:
+Do NOT return PDF metadata.
+Do NOT return catalog objects.
+Do NOT explain.
+
+DOCUMENT:
 {text}
 """
 
-
 def _extract_json(text):
     text = text.strip()
+
+    # remove markdown fences
+    text = re.sub(r"```json|```", "", text).strip()
+
+    # extract json block
     match = re.search(r"\{[\s\S]*\}", text)
+
     if match:
+        json_text = match.group()
+
         try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
+            return json.loads(json_text)
+        except Exception as e:
+            print("JSON PARSE ERROR:", e)
+            print(json_text)
+
     return {
         "case_title": "Not clearly mentioned",
         "court": "Not clearly mentioned",
@@ -91,11 +91,18 @@ def generate_brief_from_bytes(file_bytes, filename, user_id: str = None):
         temp_path = tmp.name
 
     try:
-        documents = SimpleDirectoryReader(input_files=[temp_path]).load_data()
-        full_text = "\n".join(doc.text for doc in documents)
-        prompt = BRIEF_PROMPT.format(text=full_text[:8000])
-        response = query_engine.query(prompt)
-        brief = _extract_json(str(response.response))
+        doc = fitz.open(temp_path)
+
+        full_text = ""
+
+        for page in doc:
+            full_text += page.get_text()
+
+        doc.close()
+        prompt = BRIEF_PROMPT.format(text=full_text[:2000])
+        response = llm.complete(prompt)
+        print(response)
+        brief = _extract_json(response.text)
         brief["source_file"] = filename
         if user_id:
             log_activity(user_id, "Case Brief Generated", filename)
