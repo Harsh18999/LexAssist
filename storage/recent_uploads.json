@@ -1,0 +1,100 @@
+{
+  "uploads": [
+    {
+      "filename": "case_example.pdf",
+      "uploaded_at": "2026-05-19T00:55:10.349800+05:30",
+      "size_bytes": 315959,
+      "category": "general"
+    },
+    {
+      "filename": "Kesavananda Bharati Sripadagalvaru ... vs State Of Kerala And Anr on 24 April, 1973.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.933331+05:30",
+      "size_bytes": 246234,
+      "category": "constitutional"
+    },
+    {
+      "filename": "Maneka_Gandhi_vs_Union_Of_India_on_25_January_1978.PDF",
+      "uploaded_at": "2026-05-19T00:31:33.917705+05:30",
+      "size_bytes": 760903,
+      "category": "constitutional"
+    },
+    {
+      "filename": "Justice K.S.Puttaswamy(Retd) And Anr. vs Union Of India And Ors. on 24 August, 2017.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.886452+05:30",
+      "size_bytes": 440838,
+      "category": "constitutional"
+    },
+    {
+      "filename": "S_R_Bommai_vs_Union_Of_India_on_11_March_1994.PDF",
+      "uploaded_at": "2026-05-19T00:31:33.881394+05:30",
+      "size_bytes": 887652,
+      "category": "constitutional"
+    },
+    {
+      "filename": "Shreya_Singhal_vs_U_O_I_on_24_March_2015.PDF",
+      "uploaded_at": "2026-05-19T00:31:33.865272+05:30",
+      "size_bytes": 422369,
+      "category": "cyber"
+    },
+    {
+      "filename": "Navtej_Singh_Johar_vs_Union_Of_India_Ministry_Of_Law_And_on_6_September_2018.PDF",
+      "uploaded_at": "2026-05-19T00:31:33.840772+05:30",
+      "size_bytes": 962002,
+      "category": "constitutional"
+    },
+    {
+      "filename": "D.K. Basu v. State of West Bengal _ Naya Legal.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.828661+05:30",
+      "size_bytes": 770621,
+      "category": "criminal"
+    },
+    {
+      "filename": "Arnesh_Kumar_vs_State_Of_Bihar_Anr_on_2_July_2014.PDF",
+      "uploaded_at": "2026-05-19T00:31:33.805501+05:30",
+      "size_bytes": 259150,
+      "category": "criminal"
+    },
+    {
+      "filename": "Bachan Singh Etc. Etc vs State Of Punjab Etc. Etc on 16 August, 1982.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.784453+05:30",
+      "size_bytes": 214995,
+      "category": "criminal"
+    },
+    {
+      "filename": "Lalita Kumari vs Govt.Of U.P.& Ors on 12 November, 2013.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.752858+05:30",
+      "size_bytes": 343000,
+      "category": "criminal"
+    },
+    {
+      "filename": "constitution_of_india.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.727867+05:30",
+      "size_bytes": 655093,
+      "category": "constitutional"
+    },
+    {
+      "filename": "BNSS.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.686861+05:30",
+      "size_bytes": 1324200,
+      "category": "criminal"
+    },
+    {
+      "filename": "BSA.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.655860+05:30",
+      "size_bytes": 2033181,
+      "category": "evidence"
+    },
+    {
+      "filename": "BNS.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.622859+05:30",
+      "size_bytes": 670370,
+      "category": "criminal"
+    },
+    {
+      "filename": "IT-Act-Rules_2000_0.pdf",
+      "uploaded_at": "2026-05-19T00:31:33.603859+05:30",
+      "size_bytes": 326031,
+      "category": "acts"
+    }
+  ]
+}

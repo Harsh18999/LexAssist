@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "id": "9f291f64",
+      "title": "crime",
+      "client": "xyz",
+      "court": "abcd",
+      "status": "Hearing",
+      "created_at": "2026-05-19T22:27:50.669657+05:30",
+      "updated_at": "2026-05-19T22:27:50.669657+05:30"
+    },
+    {
+      "id": "a3cb6f2c",
+      "title": "Crime",
+      "client": "XYZ",
+      "court": "Supreme COurt",
+      "status": "Pending",
+      "created_at": "2026-05-19T21:41:38.313357+05:30",
+      "updated_at": "2026-05-19T21:41:38.313357+05:30"
+    },
+    {
+      "id": "721394e9",
+      "title": "XYZ",
+      "client": "Harshit",
+      "court": "ABCD",
+      "status": "Filed",
+      "created_at": "2026-05-19T00:34:23.524866+05:30",
+      "updated_at": "2026-05-19T00:34:23.524866+05:30"
+    }
+  ]
+}

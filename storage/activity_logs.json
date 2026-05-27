@@ -1,0 +1,114 @@
+{
+  "logs": [
+    {
+      "action": "AI Query",
+      "detail": "Explain Article 21 precedents",
+      "timestamp": "2026-05-20T23:19:56.989132+05:30"
+    },
+    {
+      "action": "AI Query",
+      "detail": "Summarize BNSS changes",
+      "timestamp": "2026-05-20T22:05:11.619560+05:30"
+    },
+    {
+      "action": "Case Created",
+      "detail": "crime",
+      "timestamp": "2026-05-19T22:27:50.672653+05:30"
+    },
+    {
+      "action": "Case Brief Generated",
+      "detail": "demo_case_file_filled.pdf",
+      "timestamp": "2026-05-19T22:26:44.508374+05:30"
+    },
+    {
+      "action": "AI Query",
+      "detail": "article 21",
+      "timestamp": "2026-05-19T22:25:54.126774+05:30"
+    },
+    {
+      "action": "AI Query",
+      "detail": "article 21",
+      "timestamp": "2026-05-19T21:49:46.301635+05:30"
+    },
+    {
+      "action": "AI Query",
+      "detail": "article 375",
+      "timestamp": "2026-05-19T21:49:29.495392+05:30"
+    },
+    {
+      "action": "AI Query",
+      "detail": "article 1",
+      "timestamp": "2026-05-19T21:49:03.560232+05:30"
+    },
+    {
+      "action": "Case Brief Generated",
+      "detail": "demo_case_file_filled.pdf",
+      "timestamp": "2026-05-19T21:47:51.213079+05:30"
+    },
+    {
+      "action": "Case Brief Generated",
+      "detail": "case_example.pdf",
+      "timestamp": "2026-05-19T21:44:28.353427+05:30"
+    },
+    {
+      "action": "Case Created",
+      "detail": "Crime",
+      "timestamp": "2026-05-19T21:41:38.317358+05:30"
+    },
+    {
+      "action": "Case Brief Generated",
+      "detail": "case_example.pdf",
+      "timestamp": "2026-05-19T21:40:54.441156+05:30"
+    },
+    {
+      "action": "AI Query",
+      "detail": "explain article 27",
+      "timestamp": "2026-05-19T21:40:20.257783+05:30"
+    },
+    {
+      "action": "Case Brief Generated",
+      "detail": "case_example.pdf",
+      "timestamp": "2026-05-19T10:45:34.626241+05:30"
+    },
+    {
+      "action": "Case Brief Generated",
+      "detail": "case_example.pdf",
+      "timestamp": "2026-05-19T00:55:38.749760+05:30"
+    },
+    {
+      "action": "Document Uploaded",
+      "detail": "case_example.pdf",
+      "timestamp": "2026-05-19T00:55:10.352801+05:30"
+    },
+    {
+      "action": "AI Query",
+      "detail": "explain article 27",
+      "timestamp": "2026-05-19T00:54:51.799540+05:30"
+    },
+    {
+      "action": "Case Brief Generated",
+      "detail": "case_example.pdf",
+      "timestamp": "2026-05-19T00:48:06.161983+05:30"
+    },
+    {
+      "action": "Case Brief Generated",
+      "detail": "case_example.pdf",
+      "timestamp": "2026-05-19T00:43:42.630756+05:30"
+    },
+    {
+      "action": "Case Created",
+      "detail": "XYZ",
+      "timestamp": "2026-05-19T00:34:23.526867+05:30"
+    },
+    {
+      "action": "AI Query",
+      "detail": "who won the above case",
+      "timestamp": "2026-05-19T00:33:26.467245+05:30"
+    },
+    {
+      "action": "AI Query",
+      "detail": "Explain Article 21 precedents",
+      "timestamp": "2026-05-19T00:32:59.192216+05:30"
+    }
+  ]
+}

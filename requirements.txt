@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+bcrypt
+pyjwt
+email-validator
+llama-index
+llama-index-llms-openai
+llama-index-vector-stores-chroma
+llama-index-embeddings-huggingface
+chromadb
+sentence-transformers
+openai
+pymupdf
+reportlab

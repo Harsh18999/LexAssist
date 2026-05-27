@@ -1,0 +1,19 @@
+# Node
+node_modules/
+
+# Python
+venv/
+__pycache__/
+
+# Environment
+.env
+
+# Build
+dist/
+build/
+
+# Database
+Data/Processed/chroma_db/
+
+# Logs
+*.log

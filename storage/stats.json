@@ -1,0 +1,11 @@
+{
+  "ai_queries": 10,
+  "total_response_time_ms": 124871,
+  "query_topics": {
+    "Constitutional Law": 8,
+    "General Legal Research": 1,
+    "Criminal Law": 1
+  },
+  "retrieval_count": 49,
+  "last_indexed": null
+}
