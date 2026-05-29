@@ -122,15 +122,45 @@ def _build_prompt_prefix(user_id: str, case_id: str = None) -> str:
 
 
 def _get_case_context_str(user_id: str, case_id: str) -> str:
-    """Return a brief case-context string for LangGraph injection."""
-    case = get_case(user_id, case_id)
-    if not case:
+    """Return a rich case-context block for LangGraph system prompt injection."""
+    from backend.db.database import row_to_dict
+    from backend.db.database import get_conn
+    try:
+        with get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT c.*, cl.name AS client_name, cl.phone AS client_phone,
+                          cl.email AS client_email
+                   FROM cases c
+                   LEFT JOIN clients cl ON c.client_id = cl.id
+                   WHERE c.id = %s AND c.user_id = %s""",
+                (case_id, user_id),
+            )
+            row = cur.fetchone()
+            cur.close()
+        if not row:
+            return ""
+        c = row_to_dict(row)
+        parts = [
+            f"Case Title: {c.get('title', '—')}",
+            f"Case Number: {c.get('case_number', '—')}",
+            f"Court: {c.get('court', '—')}",
+            f"Case Type: {c.get('case_type', '—')}",
+            f"Status: {c.get('status', '—')}",
+            f"Petitioner: {c.get('petitioner', '—')}",
+            f"Respondent: {c.get('respondent', '—')}",
+            f"Judge(s): {c.get('judges', '—')}",
+            f"Advocate: {c.get('advocate', '—')}",
+            f"Filing Date: {c.get('filing_date', '—')}",
+            f"Next Hearing: {c.get('hearing_date', '—')}",
+            f"Judgment Date: {c.get('judgment_date', '—')}",
+            f"Acts Involved: {c.get('acts_involved', '—')}",
+            f"Constitutional Articles: {c.get('constitutional_articles', '—')}",
+            f"Client: {c.get('client_name', '—')} | Phone: {c.get('client_phone', '—')} | Email: {c.get('client_email', '—')}",
+        ]
+        return "\n".join(parts)
+    except Exception:
         return ""
-    return (
-        f"Title: {case.get('title')} | Court: {case.get('court')} | "
-        f"Petitioner: {case.get('petitioner')} | Respondent: {case.get('respondent')} | "
-        f"Status: {case.get('status')}"
-    )
 
 
 # ---------------------------------------------------------------------------

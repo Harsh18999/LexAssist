@@ -138,7 +138,6 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
   const [messages, setMessages] = useState([]);
   const [streamingText, setStreamingText] = useState("");
   const [aiStatus, setAiStatus] = useState(""); // "Thinking…" | "Searching…" | etc.
-  const [citations, setCitations] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -148,14 +147,16 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
   const msgsEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Load threads for this case (mode = "CASE")
+  // Load threads for this case
+  // Thread management uses "MAIN" mode scoped by case_id (backward-compatible with all backends)
+  // The CASE agent behavior is triggered in the chat stream via case_id
   useEffect(() => {
     if (!caseId) return;
-    api.threads("CASE", caseId)
+    api.threads("MAIN", caseId)
       .then(async (d) => {
         let list = d.threads || [];
         if (list.length === 0) {
-          const t = await api.defaultThread("CASE", caseId);
+          const t = await api.defaultThread("MAIN", caseId);
           list = [t];
         }
         setThreads(list);
@@ -176,7 +177,7 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
     setAiStatus("");
     setHistoryLoading(true);
     try {
-      const d = await api.threadHistory(t.id, "CASE", caseId);
+      const d = await api.threadHistory(t.id, "MAIN", caseId);
       setMessages(d.messages || []);
     } catch {
       setMessages([]);
@@ -190,7 +191,7 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
     setCreating(true);
     try {
       const title = `Thread ${threads.length + 1}`;
-      const t = await api.createThread("CASE", title, caseId);
+      const t = await api.createThread("MAIN", title, caseId);
       setThreads((prev) => [t, ...prev]);
       loadThread(t);
       setShowThreadList(false);
@@ -226,7 +227,7 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
 
     ctrlRef.current = api.streamChatV2(
       activeThread.id,
-      "CASE",
+      "MAIN",
       q,
       caseId,
       // onChunk
@@ -241,7 +242,6 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
         setMessages((prev) => [...prev, aiMsg]);
         setStreamingText("");
         setAiStatus("");
-        setCitations(evt.citations || []);
         setLoading(false);
         setThreads((prev) =>
           prev.map((t) =>
@@ -458,37 +458,6 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
           {loading ? <span className="spinner" /> : "Ask"}
         </button>
       </div>
-
-      {/* Citations */}
-      {citations.length > 0 && (
-        <div style={{ marginTop: "0.7rem", borderTop: "1px solid var(--border)", paddingTop: "0.6rem" }}>
-          <div style={{
-            fontSize: "0.65rem", fontWeight: 700, color: "var(--muted)",
-            textTransform: "uppercase", letterSpacing: "0.06em",
-            marginBottom: "0.4rem", display: "flex", alignItems: "center", gap: "0.35rem",
-          }}>
-            📎 Sources
-            <span style={{
-              background: "var(--bg-elevated)", border: "1px solid var(--border)",
-              borderRadius: "1rem", padding: "0.05rem 0.35rem", fontSize: "0.65rem", fontWeight: 600,
-            }}>{citations.length}</span>
-          </div>
-          {citations.map((c, i) => (
-            <div key={i} className="chat-panel-cite" style={{
-              marginBottom: "0.4rem", padding: "0.45rem 0.6rem",
-              background: "var(--bg-elevated)", borderRadius: "0.45rem",
-              border: "1px solid var(--border)", transition: "background 0.12s",
-            }}>
-              <strong style={{ fontSize: "0.72rem", display: "block", marginBottom: "0.1rem", color: "var(--accent)" }}>
-                {c.file_name}
-              </strong>
-              <p style={{ fontSize: "0.69rem", marginTop: "0.05rem", color: "var(--muted)", lineHeight: 1.45, margin: 0 }}>
-                {c.snippet}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

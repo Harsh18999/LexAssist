@@ -373,7 +373,6 @@ export default function Research() {
   const [messages, setMessages] = useState([]);
   const [streamingText, setStreamingText] = useState("");
   const [aiStatus, setAiStatus] = useState(""); // real-time AI status
-  const [citations, setCitations] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -402,7 +401,6 @@ export default function Research() {
     setThreadsLoading(true);
     setActiveThread(null);
     setMessages([]);
-    setCitations([]);
     setStreamingText("");
     setAiStatus("");
 
@@ -440,7 +438,6 @@ export default function Research() {
     if (activeThread?.id === t.id) return;
     setActiveThread(t);
     setMessages([]);
-    setCitations([]);
     setStreamingText("");
     setAiStatus("");
     setHistoryLoading(true);
@@ -463,8 +460,8 @@ export default function Research() {
       setThreads((prev) => [t, ...prev]);
       setActiveThread(t);
       setMessages([]);
-      setCitations([]);
       setStreamingText("");
+      setAiStatus("");
       inputRef.current?.focus();
     } catch {}
     setCreating(false);
@@ -483,7 +480,7 @@ export default function Research() {
     setThreads(remaining);
     if (activeThread?.id === threadId) {
       if (remaining.length > 0) selectThread(remaining[0]);
-      else { setActiveThread(null); setMessages([]); setCitations([]); }
+      else { setActiveThread(null); setMessages([]); }
     }
   }
 
@@ -496,7 +493,6 @@ export default function Research() {
     setQuery("");
     setStreamingText("");
     setAiStatus("");
-    setCitations([]);
 
     setMessages((prev) => [...prev, { role: "user", content: q, timestamp: new Date().toISOString() }]);
 
@@ -513,7 +509,6 @@ export default function Research() {
         setMessages((prev) => [...prev, { role: "assistant", content: accumulated, timestamp: new Date().toISOString() }]);
         setStreamingText("");
         setAiStatus("");
-        setCitations(evt.citations || []);
         setLoading(false);
         setThreads((prev) => prev.map((t) =>
           t.id === activeThread.id ? { ...t, updated_at: new Date().toISOString() } : t
@@ -637,10 +632,10 @@ export default function Research() {
         </div>
       </header>
 
-      {/* 3-column layout */}
+      {/* 2-column layout: sidebar + chat */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "230px 1fr 280px",
+        gridTemplateColumns: "230px 1fr",
         gap: "0.85rem",
         height: "calc(100vh - 175px)",
         minHeight: 420,
@@ -822,72 +817,6 @@ export default function Research() {
           </div>
         </div>
 
-        {/* Right column: citations + info */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem", overflow: "hidden" }}>
-          <div className="glass" style={{ flex: 1, overflow: "auto", marginBottom: 0 }}>
-            <h3 style={{ fontSize: "0.85rem", marginBottom: "0.65rem", fontWeight: 700, display: "flex", alignItems: "center", gap: "0.35rem" }}>
-              📎 Citations
-              {citations.length > 0 && (
-                <span style={{
-                  fontSize: "0.65rem", background: "var(--bg-elevated)",
-                  border: "1px solid var(--border)", borderRadius: "1rem",
-                  padding: "0.1rem 0.4rem", fontWeight: 600,
-                }}>{citations.length}</span>
-              )}
-            </h3>
-            {citations.length ? (
-              citations.map((c, i) => (
-                <div key={i} style={{
-                  marginBottom: "0.55rem", padding: "0.5rem 0.6rem",
-                  background: "var(--bg-elevated)", borderRadius: "0.5rem",
-                  border: "1px solid var(--border)",
-                }}>
-                  <strong style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.15rem", color: "var(--text)" }}>
-                    {c.file_name}
-                  </strong>
-                  <p style={{ fontSize: "0.73rem", lineHeight: 1.5, color: "var(--muted)", margin: 0 }}>{c.snippet}</p>
-                </div>
-              ))
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1.5rem 0", color: "var(--muted)" }}>
-                <div style={{ fontSize: "1.3rem", marginBottom: "0.3rem", opacity: 0.4 }}>📎</div>
-                <div style={{ fontSize: "0.78rem" }}>Sources appear after responses</div>
-              </div>
-            )}
-          </div>
-
-          {/* Thread info */}
-          {activeThread && (
-            <div className="glass" style={{ marginBottom: 0, padding: "0.85rem" }}>
-              <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.35rem" }}>
-                Thread Info
-              </div>
-              <div style={{ fontSize: "0.82rem", fontWeight: 600, marginBottom: "0.1rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {activeThread.title}
-              </div>
-              <div style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
-                {messages.length} messages · Persistent memory
-              </div>
-              {mode === "CASE" && (
-                <div style={{ marginTop: "0.5rem" }}>
-                  <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.25rem" }}>
-                    Active Tools
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
-                    {["fetch_case_info", "search_case_docs", "search_all_laws", "search_bns", "search_bnss", "search_bsa", "search_constitution", "search_it_act"].map((t) => (
-                      <span key={t} style={{
-                        fontSize: "0.58rem", padding: "0.1rem 0.35rem",
-                        borderRadius: "0.3rem", background: "rgba(67,56,202,0.1)",
-                        color: "#818cf8", fontFamily: "monospace",
-                        border: "1px solid rgba(67,56,202,0.15)",
-                      }}>{t}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
       </div>
     </>
   );

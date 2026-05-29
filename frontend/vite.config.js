@@ -7,6 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
+        // Switch to "http://127.0.0.1:8000" when running the local backend
         target: "https://lex-assist-4cenvys6t-harshs-projects-9878f077.vercel.app",
         changeOrigin: true,
       },

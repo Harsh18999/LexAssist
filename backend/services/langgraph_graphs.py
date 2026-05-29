@@ -82,6 +82,7 @@ class ChatState(TypedDict):
     citations: list[dict]
     mode: str
     case_id: str | None
+    case_context: str  # rich case details injected into system prompt
 
 
 # ---------------------------------------------------------------------------
@@ -127,11 +128,13 @@ _MODE_LABELS = {
 def _make_main_graph():
     """
     MAIN graph — global RAG, no source filter.
+    When case_context is present in state, injects full case details into
+    the system prompt so the AI is case-aware.
       retrieve -> generate -> END
     """
 
     async def retrieve_node(state: ChatState) -> dict:
-        retriever = await get_retriever({"k": 5})
+        retriever = await get_retriever({"k": 6})
         docs = await retriever.ainvoke(state["query"])
         return {
             "context_docs": _extract_citations(docs),
@@ -142,14 +145,17 @@ def _make_main_graph():
         context = "\n\n".join(
             d["snippet"] for d in state.get("context_docs", [])
         )
+        case_ctx = state.get("case_context", "").strip()
+        case_section = f"\n\n### Active Case Details:\n{case_ctx}" if case_ctx else ""
         system = (
             "You are JurisAI, an expert Indian legal research assistant. "
             "Answer based on the following context from legal documents. "
-            "Be precise, cite relevant sections, and if you don't know say so.\n\n"
-            f"Context:\n{context}"
+            "Be precise, cite relevant sections, and if you don't know say so."
+            f"{case_section}\n\n"
+            f"Retrieved Legal Context:\n{context}"
         )
-        history = state["messages"]
-        msgs = [SystemMessage(content=system)] + list(history)
+        history = [m for m in state["messages"] if not isinstance(m, SystemMessage)]
+        msgs = [SystemMessage(content=system)] + history
 
         response = await llm.ainvoke(msgs)
         ai_msg = AIMessage(content=response.content)
@@ -172,13 +178,14 @@ def _make_source_filtered_graph(mode: str):
     """
     Source-filtered graph for BNS / BNSS / BSA / CNT / IT.
     Filters vector DB by metadata filter = {'source': mode}.
+    Injects case_context into system prompt when present.
       retrieve -> generate -> END
     """
     source_label = _MODE_LABELS.get(mode, mode)
 
     async def retrieve_node(state: ChatState) -> dict:
         search_kwargs = {
-            "k": 5,
+            "k": 6,
             "filter": {"source": mode},
         }
         retriever = await get_retriever(search_kwargs)
@@ -189,10 +196,13 @@ def _make_source_filtered_graph(mode: str):
         context = "\n\n".join(
             d["snippet"] for d in state.get("context_docs", [])
         )
+        case_ctx = state.get("case_context", "").strip()
+        case_section = f"\n\n### Active Case Details:\n{case_ctx}" if case_ctx else ""
         system = (
             f"You are JurisAI, an expert Indian legal AI assistant specialised in {source_label}. "
             f"Answer questions using only the {source_label} documents retrieved below. "
-            "Be precise, cite relevant sections or articles, and if you don't know say so.\n\n"
+            "Be precise, cite relevant sections or articles, and if you don't know say so."
+            f"{case_section}\n\n"
             f"Context from {source_label}:\n{context}"
         )
         history = [m for m in state["messages"] if not isinstance(m, SystemMessage)]
@@ -535,6 +545,7 @@ async def run_graph_streaming(
         "citations": [],
         "mode": mode,
         "case_id": case_id,
+        "case_context": case_context,  # injected into system prompt by generate nodes
     }
 
     final_answer = ""

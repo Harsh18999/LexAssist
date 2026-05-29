@@ -16,12 +16,12 @@ from langchain_core.prompts import PromptTemplate
 # ---------------------------------------------------------------------------
 
 llm = ChatBedrockConverse(
-    model="deepseek.v3.2",
+    model="openai.gpt-oss-safeguard-120b",
     region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
     streaming=True,
 )
 
-print("LOADED MODEL: deepseek.v3.2 (AWS Bedrock Converse API)")
+print("LOADED MODEL: openai.gpt-oss-safeguard-120b (AWS Bedrock Converse API)")
 
 # ---------------------------------------------------------------------------
 # Bedrock Embeddings

@@ -18,7 +18,7 @@ from backend.services.activity_service import log_activity
 # Shared Bedrock model instance
 # ---------------------------------------------------------------------------
 
-_llm = ChatBedrock(model="deepseek.v3.2", streaming=True)
+_llm = ChatBedrock(model="openai.gpt-oss-safeguard-120b", streaming=True)
 
 BRIEF_PROMPT = """\
 You are a legal AI assistant.
@@ -110,7 +110,7 @@ def _extract_pdf_text(file_bytes: bytes, max_chars: int = 4000) -> str:
 
 
 def generate_brief_from_bytes(file_bytes: bytes, filename: str, user_id: str = None) -> dict:
-    """Generate a structured legal brief using Bedrock DeepSeek with streaming."""
+    """Generate a structured legal brief using Bedrock GPT-OSS-Safeguard-120B with streaming."""
     text = _extract_pdf_text(file_bytes)
     prompt = BRIEF_PROMPT.format(text=text)
 
