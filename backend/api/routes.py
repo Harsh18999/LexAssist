@@ -508,7 +508,11 @@ async def chat_stream(req: ThreadChatRequest, user=Depends(get_current_user)):
             case_id=req.case_id,
         ),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 

@@ -138,6 +138,7 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
   const [messages, setMessages] = useState([]);
   const [streamingText, setStreamingText] = useState("");
   const [aiStatus, setAiStatus] = useState(""); // "Thinking…" | "Searching…" | etc.
+  const [citations, setCitations] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);

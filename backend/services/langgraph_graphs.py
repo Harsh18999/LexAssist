@@ -528,6 +528,12 @@ async def run_graph_streaming(
     """
     Stream events from the LangGraph graph for the given thread.
 
+    LangGraph's astream(stream_mode="updates") yields per-node, not per-token,
+    so the full AI response arrives at once. To give the frontend a real-time
+    typing experience we:
+      1. Run the graph and collect status events + final answer.
+      2. Drip-feed the final answer in small word-groups with tiny delays.
+
     Yields dicts:
       {"type": "status",  "content": "Thinking…" | "Searching…" | "Writing…"}
       {"type": "chunk",  "content": "..."}
@@ -550,12 +556,12 @@ async def run_graph_streaming(
 
     final_answer = ""
     citations: list[dict] = []
-    has_started_writing = False
 
     try:
         # Emit initial thinking status
         yield {"type": "status", "content": "Thinking…"}
 
+        # --- Phase 1: Run the graph, yielding status events in real-time ---
         async for event in graph.astream(input_state, config=config, stream_mode="updates"):
             # Each event is {node_name: updated_state_slice}
             for node_name, node_output in event.items():
@@ -563,15 +569,9 @@ async def run_graph_streaming(
                     yield {"type": "status", "content": "Searching documents…"}
 
                 elif node_name == "generate":
-                    # RAG modes (MAIN / source-filtered)
-                    if not has_started_writing:
-                        yield {"type": "status", "content": "Writing response…"}
-                        has_started_writing = True
+                    # RAG modes (MAIN / source-filtered) — capture answer
                     answer = node_output.get("final_answer", "")
-                    if answer and answer != final_answer:
-                        delta = answer[len(final_answer):]
-                        if delta:
-                            yield {"type": "chunk", "content": delta}
+                    if answer:
                         final_answer = answer
                         citations = node_output.get("citations", citations)
 
@@ -580,23 +580,15 @@ async def run_graph_streaming(
                     msgs = node_output.get("messages", [])
                     for msg in msgs:
                         if isinstance(msg, AIMessage) and msg.content:
-                            # Only yield text content (skip pure tool-call messages)
                             content = msg.content
                             if isinstance(content, list):
-                                # Content may be a list of blocks (tool_use + text)
                                 text_parts = [
                                     b.get("text", "") if isinstance(b, dict) else str(b)
                                     for b in content
                                     if not (isinstance(b, dict) and b.get("type") == "tool_use")
                                 ]
                                 content = "".join(text_parts)
-                            if content and content != final_answer:
-                                if not has_started_writing:
-                                    yield {"type": "status", "content": "Writing response…"}
-                                    has_started_writing = True
-                                delta = content[len(final_answer):]
-                                if delta:
-                                    yield {"type": "chunk", "content": delta}
+                            if content:
                                 final_answer = content
 
                 elif node_name == "tools":
@@ -625,6 +617,21 @@ async def run_graph_streaming(
                                         "file_name": f"[{name}]",
                                         "snippet": raw[:350],
                                     })
+
+        # --- Phase 2: Drip-feed the final answer as simulated token stream ---
+        if final_answer:
+            yield {"type": "status", "content": "Writing response…"}
+            # Split into small word-groups for a natural typing feel
+            words = final_answer.split(" ")
+            WORDS_PER_CHUNK = 3
+            for i in range(0, len(words), WORDS_PER_CHUNK):
+                chunk_words = words[i : i + WORDS_PER_CHUNK]
+                # Re-add the space that split() consumed, except before the first chunk
+                chunk_text = " ".join(chunk_words)
+                if i > 0:
+                    chunk_text = " " + chunk_text
+                yield {"type": "chunk", "content": chunk_text}
+                await asyncio.sleep(0.02)  # 20ms per word-group ≈ natural typing speed
 
         yield {"type": "done", "citations": citations, "final_answer": final_answer}
 
