@@ -10,25 +10,30 @@ def _now():
 
 def list_timeline(user_id: str, case_id: str):
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM hearings WHERE user_id=? AND case_id=? ORDER BY event_date ASC",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM hearings WHERE user_id=%s AND case_id=%s ORDER BY event_date ASC",
             (user_id, case_id),
-        ).fetchall()
+        )
+        rows = cur.fetchall()
+        cur.close()
     return [row_to_dict(r) for r in rows]
 
 
 def add_event(user_id: str, case_id: str, data: dict):
     eid = str(uuid.uuid4())[:10]
     with get_conn() as conn:
-        conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             """INSERT INTO hearings
             (id, user_id, case_id, event_date, event_type, court, description, created_at)
-            VALUES (?,?,?,?,?,?,?,?)""",
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
             (
                 eid, user_id, case_id, data["event_date"], data.get("event_type", "hearing"),
                 data.get("court"), data.get("description"), _now(),
             ),
         )
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM hearings WHERE id=?", (eid,)).fetchone()
+        cur.execute("SELECT * FROM hearings WHERE id=%s", (eid,))
+        row = cur.fetchone()
+        cur.close()
     return row_to_dict(row)

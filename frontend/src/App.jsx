@@ -10,9 +10,8 @@ import ClientDetail from "./pages/ClientDetail";
 import Cases from "./pages/Cases";
 import CaseDetail from "./pages/CaseDetail";
 import Research from "./pages/Research";
-import Knowledge from "./pages/Knowledge";
+import Documents from "./pages/Documents";
 import Upload from "./pages/Upload";
-import Brief from "./pages/Brief";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -34,9 +33,11 @@ export default function App() {
                   <Route path="/cases/:id" element={<CaseDetail />} />
                   <Route path="/research" element={<Research />} />
                   <Route path="/chat" element={<Navigate to="/research" replace />} />
-                  <Route path="/knowledge" element={<Knowledge />} />
+                  <Route path="/documents" element={<Documents />} />
                   <Route path="/upload" element={<Upload />} />
-                  <Route path="/brief" element={<Brief />} />
+                  {/* Redirect old routes */}
+                  <Route path="/knowledge" element={<Navigate to="/documents" replace />} />
+                  <Route path="/brief" element={<Navigate to="/cases" replace />} />
                   <Route path="/insights" element={<Navigate to="/" replace />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

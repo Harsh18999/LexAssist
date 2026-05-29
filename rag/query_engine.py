@@ -1,74 +1,112 @@
 import os
-
+import asyncio
 from dotenv import load_dotenv
+
 load_dotenv()
 
-import chromadb
+from langchain_aws import ChatBedrockConverse, BedrockEmbeddings
+from langchain_postgres import PGEngine, PGVectorStore
+from langchain_classic.chains import RetrievalQA
+from langchain_core.prompts import PromptTemplate
 
-from llama_index.core import VectorStoreIndex
-from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.core import StorageContext
-from llama_index.llms.ollama import Ollama
+# ---------------------------------------------------------------------------
+# Bedrock LLM (streaming via Converse API)
+# ChatBedrockConverse uses the unified Bedrock Converse API which correctly
+# serialises the `messages` array for all models including DeepSeek.
+# ---------------------------------------------------------------------------
+
+llm = ChatBedrockConverse(
+    model="deepseek.v3.2",
+    region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
+    streaming=True,
+)
+
+print("LOADED MODEL: deepseek.v3.2 (AWS Bedrock Converse API)")
+
+# ---------------------------------------------------------------------------
+# Bedrock Embeddings
+# ---------------------------------------------------------------------------
+
+_bedrock_embeddings = BedrockEmbeddings(
+    model_id="amazon.titan-embed-text-v2:0",
+    region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
+)
+
+print("LOADED EMBEDDINGS: amazon.titan-embed-text-v2:0 (AWS Bedrock)")
+
+# ---------------------------------------------------------------------------
+# PGEngine + PGVectorStore (langchain-postgres)
+# ---------------------------------------------------------------------------
+
+ASYNC_DATABASE_URL = os.getenv("ASYNC_DATABASE_URL")
+TABLE_NAME = "LEGAL_VECTOR_DB"
+
+pg_engine = PGEngine.from_connection_string(url=ASYNC_DATABASE_URL)
 
 
-# -----------------------------
-# Embedding Model
-# -----------------------------
+async def _build_store() -> PGVectorStore:
+    return await PGVectorStore.create(
+        engine=pg_engine,
+        table_name=TABLE_NAME,
+        embedding_service=_bedrock_embeddings,
+    )
 
-embed_model = HuggingFaceEmbedding(
-    model_name="BAAI/bge-small-en-v1.5"
+
+# Lazy singleton — created once on first use (async-safe)
+_store: PGVectorStore | None = None
+_store_lock = asyncio.Lock()
+
+
+async def _get_store() -> PGVectorStore:
+    global _store
+    async with _store_lock:
+        if _store is None:
+            _store = await _build_store()
+    return _store
+
+
+# ---------------------------------------------------------------------------
+# Retriever (top-5 similar chunks)
+# ---------------------------------------------------------------------------
+
+async def get_retriever(search_kwargs: dict = None):
+    store = await _get_store()
+    return store.as_retriever(
+        search_type="similarity",
+        search_kwargs=search_kwargs or {"k": 5},
+    )
+
+
+# ---------------------------------------------------------------------------
+# RAG chain
+# ---------------------------------------------------------------------------
+
+_RAG_PROMPT = PromptTemplate.from_template(
+    "You are a legal AI assistant. Use the following context from Indian legal documents "
+    "to answer the question. If you don't know, say so.\n\n"
+    "Context:\n{context}\n\n"
+    "Question: {question}\n\n"
+    "Answer:"
 )
 
 
-# -----------------------------
-# Local Ollama LLM
-# -----------------------------
-
-llm = Ollama(
-    model="phi3:mini",
-    request_timeout=1200.0,
-    context_window=1024,
-)
-
-print("LOADED MODEL: phi3:mini")
-# -----------------------------
-# ChromaDB Setup
-# -----------------------------
-
-client = chromadb.PersistentClient(
-    path="Data/Processed/chroma_db"
-)
-
-collection = client.get_or_create_collection(
-    name="jurisai_legal_docs"
-)
-
-vector_store = ChromaVectorStore(
-    chroma_collection=collection
-)
-
-storage_context = StorageContext.from_defaults(
-    vector_store=vector_store
-)
+def build_rag_chain(retriever=None):
+    """Build a RetrievalQA chain with the given retriever (or the default one)."""
+    return RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=retriever or get_retriever(),
+        return_source_documents=True,
+        chain_type_kwargs={"prompt": _RAG_PROMPT},
+    )
 
 
-# -----------------------------
-# Load Existing Vector Index
-# -----------------------------
-
-index = VectorStoreIndex.from_vector_store(
-    vector_store=vector_store,
-    embed_model=embed_model
-)
+# Default chain instance (created lazily on first query)
+_rag_chain: RetrievalQA | None = None
 
 
-# -----------------------------
-# Create Query Engine
-# -----------------------------
-
-query_engine = index.as_query_engine(
-    llm=llm,
-    similarity_top_k=5,
-    response_mode="compact"
-)
+def get_rag_chain() -> RetrievalQA:
+    global _rag_chain
+    if _rag_chain is None:
+        _rag_chain = build_rag_chain()
+    return _rag_chain

@@ -1,10 +1,12 @@
 import os
+import tempfile
 from datetime import datetime
 
 import fitz
 
-DATA_DIR = "Data"
-CHROMA_PATH = "Data/Processed/chroma_db"
+from backend.utils import s3_storage
+
+PG_VECTOR_TABLE = "data_jurisai_legal_docs"  # LlamaIndex PGVector table name
 
 CATEGORY_KEYWORDS = {
     "constitutional": [
@@ -24,7 +26,7 @@ CATEGORY_KEYWORDS = {
 }
 
 
-def detect_category(filename):
+def detect_category(filename: str) -> str:
     name = filename.lower().replace("_", " ")
     for category, keywords in CATEGORY_KEYWORDS.items():
         if any(kw in name for kw in keywords):
@@ -32,79 +34,94 @@ def detect_category(filename):
     return "general"
 
 
-def index_status():
-    exists = os.path.exists(CHROMA_PATH)
-    sqlite = os.path.join(CHROMA_PATH, "chroma.sqlite3")
-    if exists and os.path.isfile(sqlite):
-        return "Active"
-    if exists:
-        return "Active"
-    return "Not Built"
-
-
-def _format_size(size_bytes):
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    if size_bytes < 1024 * 1024:
-        return f"{round(size_bytes / 1024, 1)} KB"
-    return f"{round(size_bytes / (1024 * 1024), 1)} MB"
-
-
-def list_documents(search=""):
-    docs = []
-    if not os.path.isdir(DATA_DIR):
-        return docs
-
-    for root, _, files in os.walk(DATA_DIR):
-        if "Processed" in root.replace("\\", "/"):
-            continue
-        for name in files:
-            if not name.lower().endswith(".pdf"):
-                continue
-            if search and search.lower() not in name.lower():
-                continue
-
-            full_path = os.path.join(root, name)
-            stat = os.stat(full_path)
-            rel = os.path.relpath(full_path, DATA_DIR)
-
-            docs.append(
-                {
-                    "filename": name,
-                    "path": rel.replace("\\", "/"),
-                    "full_path": full_path,
-                    "upload_date": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "size_bytes": stat.st_size,
-                    "size_label": _format_size(stat.st_size),
-                    "category": detect_category(name),
-                }
+def index_status() -> str:
+    """Check whether the LEGAL_VECTOR_DB table exists and has rows."""
+    try:
+        from backend.db.database import get_conn
+        with get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) as n FROM information_schema.tables "
+                "WHERE table_name = %s",
+                (PG_VECTOR_TABLE,),
             )
+            exists = cur.fetchone()["n"] > 0
+            count = 0
+            if exists:
+                cur.execute(f'SELECT COUNT(*) as n FROM "{PG_VECTOR_TABLE}"')
+                count = cur.fetchone()["n"]
+            cur.close()
+        return "Active" if exists and count > 0 else "Not Built"
+    except Exception:
+        return "Not Built"
+
+
+def list_documents(search: str = "") -> list[dict]:
+    """List all PDF documents stored in S3 under the knowledge_base/ prefix."""
+    try:
+        objects = s3_storage.list_documents(prefix=s3_storage.FOLDER_KNOWLEDGE)
+    except Exception as exc:
+        print(f"Failed to list S3 documents: {exc}")
+        return []
+
+    docs = []
+    for obj in objects:
+        filename = obj["filename"]
+        if search and search.lower() not in filename.lower():
+            continue
+        docs.append(
+            {
+                "filename": filename,
+                "path": obj["key"],        # S3 key used as the "path"
+                "s3_key": obj["key"],
+                "upload_date": obj["last_modified"],
+                "size_bytes": obj["size_bytes"],
+                "size_label": s3_storage.get_size_label(obj["size_bytes"]),
+                "category": detect_category(filename),
+            }
+        )
 
     docs.sort(key=lambda d: d["upload_date"], reverse=True)
     return docs
 
 
-def get_document_preview(rel_path):
-    full_path = os.path.join(DATA_DIR, rel_path.replace("/", os.sep))
-    if not os.path.isfile(full_path):
+def get_document_preview(s3_key: str) -> dict | None:
+    """Download a PDF from S3 and return a text preview."""
+    try:
+        pdf_bytes = s3_storage.download_pdf(s3_key)
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        print(f"Failed to download PDF from S3 for preview: {exc}")
         return None
 
-    stat = os.stat(full_path)
-    doc = fitz.open(full_path)
-    page_count = len(doc)
-    first_page = doc[0].get_text()[:1200] if page_count > 0 else ""
-    snippet = ""
-    for page_num in range(min(3, page_count)):
-        snippet += doc[page_num].get_text()
-    doc.close()
+    # Write to tempfile for PyMuPDF
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(pdf_bytes)
+        temp_path = tmp.name
+
+    try:
+        doc = fitz.open(temp_path)
+        page_count = len(doc)
+        first_page = doc[0].get_text()[:1200] if page_count > 0 else ""
+        snippet = ""
+        for page_num in range(min(3, page_count)):
+            snippet += doc[page_num].get_text()
+        doc.close()
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
     snippet = " ".join(snippet.split())[:800]
+    filename = s3_key.split("/")[-1]
 
     return {
-        "filename": os.path.basename(full_path),
-        "path": rel_path,
-        "upload_date": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-        "size_label": _format_size(stat.st_size),
-        "category": detect_category(os.path.basename(full_path)),
+        "filename": filename,
+        "path": s3_key,
+        "s3_key": s3_key,
+        "upload_date": datetime.utcnow().isoformat(),
+        "size_label": s3_storage.get_size_label(len(pdf_bytes)),
+        "category": detect_category(filename),
         "first_page_text": first_page.strip(),
         "snippet": snippet,
         "page_count": page_count,

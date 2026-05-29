@@ -1,4 +1,19 @@
+import cache from "./cache";
+
 const API = "/api";
+const BASE_URL = ""; // same origin
+
+const TTL = {
+  dashboard: 60_000,   // 60s
+  clients:   30_000,   // 30s
+  cases:     30_000,   // 30s
+  documents: 30_000,   // 30s
+  me:        120_000,  // 2min
+  threads:   20_000,   // 20s
+};
+
+/** Tracks last observed X-Response-Time from the server */
+export const latency = { last: null };
 
 function getToken() {
   return localStorage.getItem("jurisai_token");
@@ -13,6 +28,11 @@ async function request(path, options = {}) {
   }
 
   const res = await fetch(`${API}${path}`, { ...options, headers });
+
+  // Record server-side latency from middleware header
+  const rt = res.headers.get("x-response-time");
+  if (rt) latency.last = rt;
+
   if (res.status === 401) {
     localStorage.removeItem("jurisai_token");
     localStorage.removeItem("jurisai_user");
@@ -32,74 +52,389 @@ async function request(path, options = {}) {
   return res;
 }
 
+/** Cached GET — returns cached data if fresh, otherwise fetches and caches. */
+async function cachedGet(cacheKey, path, ttlMs) {
+  const hit = cache.get(cacheKey);
+  if (hit !== null) return hit;
+  const data = await request(path);
+  cache.set(cacheKey, data, ttlMs);
+  return data;
+}
+
+/**
+ * Deduplicated GET — if an identical request is in-flight, returns the same promise.
+ * Prevents duplicate concurrent fetches for the same resource.
+ */
+const _inflightRequests = new Map();
+async function deduplicatedGet(cacheKey, path, ttlMs) {
+  // Check cache first
+  const hit = cache.get(cacheKey);
+  if (hit !== null) return hit;
+  // Return in-flight request if exists
+  if (_inflightRequests.has(cacheKey)) return _inflightRequests.get(cacheKey);
+  // Start new request
+  const promise = request(path).then((data) => {
+    cache.set(cacheKey, data, ttlMs);
+    _inflightRequests.delete(cacheKey);
+    return data;
+  }).catch((err) => {
+    _inflightRequests.delete(cacheKey);
+    throw err;
+  });
+  _inflightRequests.set(cacheKey, promise);
+  return promise;
+}
+
+/**
+ * Upload a file with real-time progress reporting via XMLHttpRequest.
+ */
+export function uploadWithProgress(path, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const token = getToken();
+    const fd = new FormData();
+    fd.append("file", file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API}${path}`, true);
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    });
+
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        localStorage.removeItem("jurisai_token");
+        window.location.href = "/login";
+        return reject(new Error("Session expired"));
+      }
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(data);
+        } else {
+          const msg = Array.isArray(data.detail)
+            ? data.detail.map((d) => d.msg).join(", ")
+            : data.detail || xhr.statusText;
+          reject(new Error(msg));
+        }
+      } catch {
+        reject(new Error("Unexpected response from server."));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Network error during upload."));
+    xhr.send(fd);
+  });
+}
+
 export const api = {
+  // Auth
   register: (data) =>
     request("/auth/register", { method: "POST", body: JSON.stringify(data) }),
   login: (data) =>
     request("/auth/login", { method: "POST", body: JSON.stringify(data) }),
-  me: () => request("/me"),
-  dashboard: () => request("/dashboard"),
-  clients: (search = "") => request(`/clients?search=${encodeURIComponent(search)}`),
-  createClient: (data) => request("/clients", { method: "POST", body: JSON.stringify(data) }),
-  getClient: (id) => request(`/clients/${id}`),
-  cases: (search = "", clientId = "") => {
-    let q = `/cases?search=${encodeURIComponent(search)}`;
+  me: () => deduplicatedGet("me", "/me", TTL.me),
+
+  // Dashboard — deduplicated + cached 60s
+  dashboard: () => deduplicatedGet("dashboard", "/dashboard", TTL.dashboard),
+
+  /**
+   * Get cached dashboard data synchronously (null if not cached).
+   * Used to render instantly before SSE stream arrives.
+   */
+  dashboardCached: () => cache.get("dashboard"),
+
+  /**
+   * Streaming dashboard via SSE.
+   */
+  dashboardStream: (onData, onError) => {
+    const token = getToken();
+    const ctrl = new AbortController();
+    fetch(`${API}/dashboard/stream`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
+    }).then(async (res) => {
+      if (!res.ok) { onError && onError(new Error(res.statusText)); return; }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const d = JSON.parse(line.slice(6));
+              cache.set("dashboard", d, TTL.dashboard);
+              onData(d);
+            } catch {}
+          }
+        }
+      }
+    }).catch((err) => {
+      if (err.name !== "AbortError") onError && onError(err);
+    });
+    return ctrl;
+  },
+
+  // Clients — deduplicated + cached 30s; invalidated on create
+  clients: (search = "", page = 1, pageSize = 10) => {
+    const key = `clients:${search}:${page}:${pageSize}`;
+    const url = `/clients?search=${encodeURIComponent(search)}&page=${page}&page_size=${pageSize}`;
+    return deduplicatedGet(key, url, TTL.clients);
+  },
+  createClient: async (data) => {
+    const result = await request("/clients", { method: "POST", body: JSON.stringify(data) });
+    cache.invalidatePrefix("clients");
+    cache.invalidate("dashboard");
+    return result;
+  },
+  getClient: (id) => deduplicatedGet(`client:${id}`, `/clients/${id}`, TTL.clients),
+
+  // Cases — deduplicated + cached 30s; invalidated on create/update
+  cases: (search = "", clientId = "", page = 1, pageSize = 10) => {
+    const key = `cases:${search}:${clientId}:${page}:${pageSize}`;
+    let q = `/cases?search=${encodeURIComponent(search)}&page=${page}&page_size=${pageSize}`;
     if (clientId) q += `&client_id=${clientId}`;
-    return request(q);
+    return deduplicatedGet(key, q, TTL.cases);
   },
-  getCase: (id) => request(`/cases/${id}`),
-  createCase: (data) => request("/cases", { method: "POST", body: JSON.stringify(data) }),
-  updateCase: (id, data) => request(`/cases/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  uploadCaseDoc: (caseId, file) => {
-    const fd = new FormData();
-    fd.append("file", file);
-    return request(`/cases/${caseId}/documents`, { method: "POST", body: fd });
+  getCase: (id) => deduplicatedGet(`case:${id}`, `/cases/${id}`, TTL.cases),
+  createCase: async (data) => {
+    const result = await request("/cases", { method: "POST", body: JSON.stringify(data) });
+    cache.invalidatePrefix("cases");
+    cache.invalidate("dashboard");
+    return result;
   },
-  caseBrief: (caseId, file) => {
-    const fd = new FormData();
-    if (file) fd.append("file", file);
-    return request(`/cases/${caseId}/brief`, { method: "POST", body: fd });
+  updateCase: async (id, data) => {
+    const result = await request(`/cases/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+    cache.invalidate(`case:${id}`);
+    cache.invalidatePrefix("cases:");
+    cache.invalidate("dashboard");
+    return result;
   },
-  addNote: (caseId, content) =>
-    request(`/cases/${caseId}/notes`, { method: "POST", body: JSON.stringify({ content }) }),
-  addTimeline: (caseId, data) =>
-    request(`/cases/${caseId}/timeline`, { method: "POST", body: JSON.stringify(data) }),
+
+  // Documents — deduplicated + cached 30s; invalidated on delete/upload
+  documents: (search = "", page = 1, pageSize = 10) => {
+    const key = `documents:${search}:${page}:${pageSize}`;
+    const url = `/documents?search=${encodeURIComponent(search)}&page=${page}&page_size=${pageSize}`;
+    return deduplicatedGet(key, url, TTL.documents);
+  },
+  deleteDocument: async (id) => {
+    const result = await request(`/documents/${id}`, { method: "DELETE" });
+    cache.invalidatePrefix("documents");
+    cache.invalidate("dashboard");
+    return result;
+  },
+  downloadDocument: (id) => request(`/documents/${id}/download`),
+
+  // Case documents
+  uploadCaseDoc: async (caseId, file, onProgress = () => {}) => {
+    const result = await uploadWithProgress(`/cases/${caseId}/documents`, file, onProgress);
+    cache.invalidate(`case:${caseId}`);
+    cache.invalidatePrefix("documents");
+    cache.invalidate("dashboard");
+    return result;
+  },
+
+  // Standalone upload
+  upload: async (file, onProgress = () => {}) => {
+    const result = await uploadWithProgress("/upload", file, onProgress);
+    cache.invalidatePrefix("documents");
+    cache.invalidate("dashboard");
+    return result;
+  },
+
+  // Notes & timeline
+  addNote: async (caseId, content) => {
+    const result = await request(`/cases/${caseId}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+    cache.invalidate(`case:${caseId}`);
+    return result;
+  },
+  addTimeline: async (caseId, data) => {
+    const result = await request(`/cases/${caseId}/timeline`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    cache.invalidate(`case:${caseId}`);
+    return result;
+  },
+
+  // Chat / AI Research — legacy (never cached)
   chatHistory: (caseId) =>
     request(caseId ? `/chat/history?case_id=${caseId}` : "/chat/history"),
   clearChat: (caseId) =>
-    request(caseId ? `/chat/history?case_id=${caseId}` : "/chat/history", { method: "DELETE" }),
+    request(
+      caseId ? `/chat/history?case_id=${caseId}` : "/chat/history",
+      { method: "DELETE" }
+    ),
+
+  // ---------------------------------------------------------------------------
+  // Thread management — cached with deduplication
+  // ---------------------------------------------------------------------------
+
+  threads: (mode = null, caseId = null) => {
+    let url = "/threads";
+    const params = [];
+    if (mode) params.push(`mode=${encodeURIComponent(mode)}`);
+    if (caseId) params.push(`case_id=${encodeURIComponent(caseId)}`);
+    if (params.length) url += "?" + params.join("&");
+    const key = `threads:${mode || ""}:${caseId || ""}`;
+    return deduplicatedGet(key, url, TTL.threads);
+  },
+
+  defaultThread: (mode = "MAIN", caseId = null) => {
+    let url = `/threads/default?mode=${encodeURIComponent(mode)}`;
+    if (caseId) url += `&case_id=${encodeURIComponent(caseId)}`;
+    return request(url);
+  },
+
+  createThread: async (mode = "MAIN", title = "New Conversation", caseId = null) => {
+    const result = await request("/threads", {
+      method: "POST",
+      body: JSON.stringify({ mode, title, case_id: caseId }),
+    });
+    // Invalidate cached thread list for this mode
+    cache.invalidatePrefix("threads:");
+    return result;
+  },
+
+  renameThread: async (threadId, title) => {
+    const result = await request(`/threads/${threadId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    });
+    cache.invalidatePrefix("threads:");
+    return result;
+  },
+
+  deleteThread: async (threadId) => {
+    const result = await request(`/threads/${threadId}`, { method: "DELETE" });
+    cache.invalidatePrefix("threads:");
+    return result;
+  },
+
+  threadHistory: (threadId, mode = "MAIN", caseId = null) => {
+    let url = `/threads/${threadId}/history?mode=${encodeURIComponent(mode)}`;
+    if (caseId) url += `&case_id=${encodeURIComponent(caseId)}`;
+    return request(url);
+  },
+
+  /**
+   * LangGraph-backed streaming chat (primary path).
+   */
+  streamChatV2: (threadId, mode, query, caseId, onChunk, onDone, onError) => {
+    const token = getToken();
+    const ctrl = new AbortController();
+    fetch(`${API}/chat/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        thread_id: threadId,
+        mode,
+        query,
+        case_id: caseId || null,
+      }),
+      signal: ctrl.signal,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        onError && onError(new Error(err.detail || res.statusText));
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === "chunk") onChunk && onChunk(evt.content);
+            else if (evt.type === "done") onDone && onDone(evt);
+            else if (evt.type === "error") onError && onError(new Error(evt.content));
+          } catch {}
+        }
+      }
+    }).catch((err) => {
+      if (err.name !== "AbortError") onError && onError(err);
+    });
+    return ctrl;
+  },
+
+  /**
+   * Streaming chat via SSE fetch (legacy).
+   */
+  streamChat: (query, caseId, onChunk, onDone, onError) => {
+    const token = getToken();
+    const ctrl = new AbortController();
+    let url = `${API}/chat`;
+    if (caseId) url += `?case_id=${caseId}`;
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ query }),
+      signal: ctrl.signal,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        onError && onError(new Error(err.detail || res.statusText));
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === "chunk") onChunk && onChunk(evt.content);
+            else if (evt.type === "done") onDone && onDone(evt);
+            else if (evt.type === "error") onError && onError(new Error(evt.content));
+          } catch {}
+        }
+      }
+    }).catch((err) => {
+      if (err.name !== "AbortError") onError && onError(err);
+    });
+    return ctrl;
+  },
+
+  // Legacy non-streaming chat
   chat: (query, caseId) => {
     let url = "/chat";
     if (caseId) url += `?case_id=${caseId}`;
     return request(url, { method: "POST", body: JSON.stringify({ query }) });
   },
-  upload: (file) => {
-    const fd = new FormData();
-    fd.append("file", file);
-    return request("/upload", { method: "POST", body: fd });
-  },
-  rebuildIndex: () => request("/index/rebuild", { method: "POST" }),
-  knowledge: (search = "") =>
-    request(`/knowledge-base?search=${encodeURIComponent(search)}`),
+
+  // Misc
   insights: () => request("/insights"),
   search: (q) => request(`/search?q=${encodeURIComponent(q)}`),
-  generateBrief: (file) => {
-    const fd = new FormData();
-    fd.append("file", file);
-    return request("/brief/generate", { method: "POST", body: fd });
-  },
-  downloadBriefPdf: async (file) => {
-    const fd = new FormData();
-    fd.append("file", file);
-    const token = getToken();
-    const res = await fetch(`${API}/brief/pdf`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: fd,
-    });
-    if (!res.ok) throw new Error("PDF failed");
-    return res.blob();
-  },
   settings: () => request("/settings"),
 };
 
@@ -113,4 +448,27 @@ export function formatTime(iso) {
   } catch {
     return iso;
   }
+}
+
+export function formatRelativeTime(iso) {
+  if (!iso) return "";
+  try {
+    const now = Date.now();
+    const then = new Date(iso).getTime();
+    const diff = now - then;
+    if (diff < 60_000) return "just now";
+    if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+    if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)}d ago`;
+    return formatTime(iso);
+  } catch {
+    return iso;
+  }
+}
+
+export function formatBytes(bytes) {
+  if (!bytes) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

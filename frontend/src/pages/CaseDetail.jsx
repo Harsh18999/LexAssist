@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api, formatTime } from "../api/client";
+import { api, formatBytes, formatTime } from "../api/client";
 import CaseChatPanel from "../components/CaseChatPanel";
 
 export default function CaseDetail() {
@@ -8,41 +8,65 @@ export default function CaseDetail() {
   const [caseData, setCaseData] = useState(null);
   const [tab, setTab] = useState("overview");
   const [note, setNote] = useState("");
-  const [file, setFile] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [uploadState, setUploadState] = useState({ progress: 0, uploading: false, error: null });
+  const inputRef = useRef(null);
 
-  function load() {
+  useEffect(() => {
     api.getCase(id).then(setCaseData);
-  }
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
-
-  async function uploadDoc(e) {
-    e.preventDefault();
+  async function uploadDoc(file) {
     if (!file) return;
-    await api.uploadCaseDoc(id, file);
-    setFile(null);
-    load();
-  }
-
-  async function generateBrief() {
-    setLoading(true);
+    setUploadState({ progress: 0, uploading: true, error: null });
     try {
-      await api.caseBrief(id, file);
-      load();
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      setLoading(false);
+      const newDoc = await api.uploadCaseDoc(id, file, (pct) =>
+        setUploadState((s) => ({ ...s, progress: pct }))
+      );
+      setUploadState({ progress: 100, uploading: false, error: null });
+      // Optimistic update — append new doc without full re-fetch
+      setCaseData((prev) => ({
+        ...prev,
+        documents: [newDoc, ...(prev.documents || [])],
+      }));
+    } catch (err) {
+      setUploadState({ progress: 0, uploading: false, error: err.message });
     }
+    if (inputRef.current) inputRef.current.value = "";
   }
 
   async function addNote(e) {
     e.preventDefault();
     if (!note.trim()) return;
-    await api.addNote(id, note);
+    const newNote = await api.addNote(id, note);
     setNote("");
-    load();
+    // Optimistic update — prepend new note without full re-fetch
+    setCaseData((prev) => ({
+      ...prev,
+      notes: [newNote, ...(prev.notes || [])],
+    }));
+  }
+
+  async function handleDownload(docId) {
+    try {
+      const res = await api.downloadDocument(docId);
+      window.open(res.url, "_blank");
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+
+  async function handleDelete(docId) {
+    if (!confirm("Delete this document from S3?")) return;
+    try {
+      await api.deleteDocument(docId);
+      // Optimistic update — remove from local state
+      setCaseData((prev) => ({
+        ...prev,
+        documents: (prev.documents || []).filter((d) => d.id !== docId),
+      }));
+    } catch (e) {
+      alert(e.message);
+    }
   }
 
   if (!caseData) return <div className="empty">Loading case…</div>;
@@ -62,8 +86,6 @@ export default function CaseDetail() {
     ["Hearing", caseData.hearing_date],
     ["Advocate", caseData.advocate],
   ];
-
-  const brief = caseData.brief;
 
   return (
     <>
@@ -85,65 +107,133 @@ export default function CaseDetail() {
           </div>
 
           <div className="tabs">
-            {["overview", "brief", "documents", "notes", "timeline"].map((t) => (
-              <button key={t} type="button" className={`tab${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
+            {["overview", "documents", "notes", "timeline"].map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`tab${tab === t ? " active" : ""}`}
+                onClick={() => setTab(t)}
+              >
                 {t.charAt(0).toUpperCase() + t.slice(1)}
+                {t === "documents" && caseData.documents?.length > 0 && (
+                  <span className="badge" style={{ marginLeft: "0.4rem", fontSize: "0.65rem" }}>
+                    {caseData.documents.length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
 
+          {/* Overview */}
           {tab === "overview" && (
             <div className="glass">
-              <h4 style={{ marginBottom: "0.5rem" }}>AI Suggested Actions</h4>
-              <ul style={{ paddingLeft: "1.2rem", color: "var(--muted)", fontSize: "0.88rem" }}>
-                {(caseData.suggested_actions || []).map((a, i) => <li key={i}>{a}</li>)}
-              </ul>
+              <h4 style={{ marginBottom: "0.5rem" }}>Case Summary</h4>
+              <div style={{ display: "grid", gap: "0.5rem" }}>
+                <div className="info-item">
+                  <div className="k">Status</div>
+                  <div className="v">
+                    <span className={`badge ${caseData.status === "Active" ? "badge-green" : ""}`}>
+                      {caseData.status || "Active"}
+                    </span>
+                  </div>
+                </div>
+                <div className="info-item">
+                  <div className="k">Documents</div>
+                  <div className="v">{caseData.documents?.length || 0} uploaded</div>
+                </div>
+                <div className="info-item">
+                  <div className="k">Notes</div>
+                  <div className="v">{caseData.notes?.length || 0} notes</div>
+                </div>
+              </div>
             </div>
           )}
 
-          {tab === "brief" && (
+          {/* Documents */}
+          {tab === "documents" && (
             <div className="glass">
-              <button type="button" className="btn btn-primary btn-sm" disabled={loading} onClick={generateBrief}>
-                {loading ? "Generating…" : "Generate AI Brief"}
-              </button>
-              {brief ? (
+              {/* Upload area */}
+              <div
+                className="case-upload-zone"
+                onClick={() => inputRef.current?.click()}
+              >
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept=".pdf"
+                  style={{ display: "none" }}
+                  onChange={(e) => uploadDoc(e.target.files?.[0])}
+                />
+                <span style={{ fontSize: "1.5rem" }}>📎</span>
+                <span style={{ fontSize: "0.88rem", color: "var(--muted)" }}>
+                  Click to upload a PDF document
+                </span>
+              </div>
+
+              {/* Progress */}
+              {uploadState.uploading && (
+                <div style={{ margin: "0.75rem 0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.3rem", fontSize: "0.8rem", color: "var(--muted)" }}>
+                    <span>Uploading to S3…</span>
+                    <span>{uploadState.progress}%</span>
+                  </div>
+                  <div className="upload-progress-bar-wrap" style={{ marginBottom: 0 }}>
+                    <div className="upload-progress-bar" style={{ width: `${uploadState.progress}%` }} />
+                  </div>
+                </div>
+              )}
+              {uploadState.error && (
+                <div className="upload-error" style={{ margin: "0.5rem 0" }}>{uploadState.error}</div>
+              )}
+
+              {/* Document list */}
+              {(caseData.documents || []).length === 0 ? (
+                <p className="meta" style={{ marginTop: "1rem" }}>No documents uploaded yet.</p>
+              ) : (
                 <div style={{ marginTop: "1rem" }}>
-                  {[
-                    ["Overview", brief.case_overview || brief.summary],
-                    ["Legal Issues", (brief.legal_issues || brief.key_legal_issues || []).join?.(" · ") || brief.legal_issues],
-                    ["Final Verdict", brief.final_verdict],
-                    ["Takeaways", (brief.key_takeaways || []).map?.((t) => `• ${t}`).join?.("\n")],
-                    ["Simple Explanation", brief.simplified_explanation],
-                  ].map(([title, val]) => val && (
-                    <div key={title} className="brief-section">
-                      <h4>{title}</h4>
-                      <p style={{ color: "var(--muted)", fontSize: "0.88rem" }}>{Array.isArray(val) ? val.join(", ") : val}</p>
+                  {(caseData.documents || []).map((d) => (
+                    <div key={d.id} className="list-row">
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                        <span style={{ fontSize: "1.2rem" }}>📄</span>
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: "0.88rem" }}>{d.filename}</div>
+                          <div className="meta">{formatBytes(d.size_bytes)} · {formatTime(d.created_at)}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: "0.4rem" }}>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleDownload(d.id)}
+                          title="Download"
+                        >
+                          ⬇
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          style={{ color: "#dc2626" }}
+                          onClick={() => handleDelete(d.id)}
+                          title="Delete"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
-              ) : <p className="meta" style={{ marginTop: "1rem" }}>No brief generated yet</p>}
+              )}
             </div>
           )}
 
-          {tab === "documents" && (
-            <div className="glass">
-              <form onSubmit={uploadDoc} style={{ marginBottom: "1rem" }}>
-                <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0])} />
-                <button type="submit" className="btn btn-primary btn-sm" style={{ marginTop: "0.5rem" }} disabled={!file}>Upload PDF</button>
-              </form>
-              {(caseData.documents || []).map((d) => (
-                <div key={d.id} className="list-row">
-                  <strong>{d.filename}</strong>
-                  <span className="meta">{formatTime(d.created_at)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
+          {/* Notes */}
           {tab === "notes" && (
             <div className="glass">
               <form onSubmit={addNote}>
-                <textarea className="textarea" placeholder="Legal strategy, hearing prep…" value={note} onChange={(e) => setNote(e.target.value)} />
+                <textarea
+                  className="textarea"
+                  placeholder="Legal strategy, hearing prep, key observations…"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
                 <button type="submit" className="btn btn-primary btn-sm">Add Note</button>
               </form>
               {(caseData.notes || []).map((n) => (
@@ -155,22 +245,27 @@ export default function CaseDetail() {
             </div>
           )}
 
+          {/* Timeline */}
           {tab === "timeline" && (
             <div className="glass">
-              {(caseData.timeline || []).length ? caseData.timeline.map((e) => (
-                <div key={e.id} className="list-row">
-                  <div>
-                    <span className="badge">{e.event_type}</span>
-                    <strong style={{ marginLeft: "0.5rem" }}>{e.event_date}</strong>
-                    <p className="meta">{e.description}</p>
+              {(caseData.timeline || []).length ? (
+                caseData.timeline.map((e) => (
+                  <div key={e.id} className="list-row">
+                    <div>
+                      <span className="badge">{e.event_type}</span>
+                      <strong style={{ marginLeft: "0.5rem" }}>{e.event_date}</strong>
+                      <p className="meta">{e.description}</p>
+                    </div>
                   </div>
-                </div>
-              )) : <p className="meta">No timeline events</p>}
+                ))
+              ) : (
+                <p className="meta">No timeline events</p>
+              )}
             </div>
           )}
         </div>
 
-        <CaseChatPanel caseId={id} />
+        <CaseChatPanel caseId={id} caseTitle={caseData.title} />
       </div>
     </>
   );

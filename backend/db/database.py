@@ -1,23 +1,34 @@
 import os
-import sqlite3
 from contextlib import contextmanager
 
-DB_PATH = os.path.join("storage", "jurisai.db")
+import psycopg2
+import psycopg2.extras
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+
+def _get_connection():
+    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
 def init_db():
-    os.makedirs("storage", exist_ok=True)
     with get_conn() as conn:
-        conn.executescript(
-            """
+        cur = conn.cursor()
+
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 name TEXT NOT NULL,
                 created_at TEXT NOT NULL
-            );
+            )
+        """)
 
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS clients (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -29,8 +40,10 @@ def init_db():
                 jurisdiction TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
-            );
+            )
+        """)
 
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS cases (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -54,8 +67,10 @@ def init_db():
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 FOREIGN KEY (client_id) REFERENCES clients(id)
-            );
+            )
+        """)
 
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS documents (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -63,12 +78,20 @@ def init_db():
                 case_id TEXT,
                 filename TEXT NOT NULL,
                 file_path TEXT NOT NULL,
+                s3_key TEXT,
                 doc_type TEXT DEFAULT 'judgment',
                 size_bytes INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
-            );
+            )
+        """)
 
+        # Migration: add s3_key column to existing deployments
+        cur.execute("""
+            ALTER TABLE documents ADD COLUMN IF NOT EXISTS s3_key TEXT
+        """)
+
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS notes (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -78,8 +101,10 @@ def init_db():
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 FOREIGN KEY (case_id) REFERENCES cases(id)
-            );
+            )
+        """)
 
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS hearings (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -91,10 +116,12 @@ def init_db():
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 FOREIGN KEY (case_id) REFERENCES cases(id)
-            );
+            )
+        """)
 
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS chat_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 case_id TEXT,
                 role TEXT NOT NULL,
@@ -102,16 +129,20 @@ def init_db():
                 citations TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
-            );
+            )
+        """)
 
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS activity_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 action TEXT NOT NULL,
                 detail TEXT,
                 created_at TEXT NOT NULL
-            );
+            )
+        """)
 
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS user_stats (
                 user_id TEXT PRIMARY KEY,
                 ai_queries INTEGER DEFAULT 0,
@@ -119,18 +150,39 @@ def init_db():
                 retrieval_count INTEGER DEFAULT 0,
                 last_indexed TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id)
-            );
-            """
-        )
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_threads (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                mode TEXT NOT NULL DEFAULT 'research',
+                case_id TEXT,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+
+        cur.execute("""
+            ALTER TABLE chat_messages
+            ADD COLUMN IF NOT EXISTS thread_id TEXT
+        """)
+
+        cur.close()
 
 
 @contextmanager
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _get_connection()
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

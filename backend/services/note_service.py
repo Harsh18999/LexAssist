@@ -10,10 +10,13 @@ def _now():
 
 def list_notes(user_id: str, case_id: str):
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM notes WHERE user_id=? AND case_id=? ORDER BY created_at DESC",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM notes WHERE user_id=%s AND case_id=%s ORDER BY created_at DESC",
             (user_id, case_id),
-        ).fetchall()
+        )
+        rows = cur.fetchall()
+        cur.close()
     return [row_to_dict(r) for r in rows]
 
 
@@ -21,16 +24,21 @@ def create_note(user_id: str, case_id: str, content: str):
     nid = str(uuid.uuid4())[:10]
     now = _now()
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO notes (id, user_id, case_id, content, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO notes (id, user_id, case_id, content, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s)",
             (nid, user_id, case_id, content.strip(), now, now),
         )
+        cur.close()
     return get_note(user_id, nid)
 
 
 def get_note(user_id: str, note_id: str):
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM notes WHERE id=? AND user_id=?", (note_id, user_id)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM notes WHERE id=%s AND user_id=%s", (note_id, user_id)
+        )
+        row = cur.fetchone()
+        cur.close()
     return row_to_dict(row)

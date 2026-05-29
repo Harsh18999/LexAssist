@@ -3,57 +3,62 @@ import os
 import re
 import tempfile
 
-from llama_index.core import SimpleDirectoryReader
+import fitz
+from langchain_aws import ChatBedrock
+from langchain_core.messages import HumanMessage
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-from rag.query_engine import llm
-from backend.services.activity_service import log_activity
-from rag.query_engine import query_engine
-import fitz
 
-BRIEF_PROMPT = """
+from backend.services.activity_service import log_activity
+
+# ---------------------------------------------------------------------------
+# Shared Bedrock model instance
+# ---------------------------------------------------------------------------
+
+_llm = ChatBedrock(model="deepseek.v3.2", streaming=True)
+
+BRIEF_PROMPT = """\
 You are a legal AI assistant.
 
 Analyze this Indian legal judgment.
 
-Return ONLY valid JSON.
+Return ONLY valid JSON with exactly these keys:
 
 {{
   "case_title": "",
   "court": "",
-  "summary": "",
-  "final_verdict": ""
+  "judgment_date": "",
+  "judges": [],
+  "petitioner": "",
+  "respondent": "",
+  "acts_involved": [],
+  "constitutional_articles": [],
+  "key_legal_issues": [],
+  "final_verdict": "",
+  "important_observations": [],
+  "summary": ""
 }}
 
 Do NOT return PDF metadata.
 Do NOT return catalog objects.
-Do NOT explain.
+Do NOT explain — return only the JSON object.
 
 DOCUMENT:
 {text}
 """
 
-def _extract_json(text):
-    text = text.strip()
 
-    # remove markdown fences
+def _extract_json(text: str) -> dict:
     text = re.sub(r"```json|```", "", text).strip()
-
-    # extract json block
     match = re.search(r"\{[\s\S]*\}", text)
-
     if match:
-        json_text = match.group()
-
         try:
-            return json.loads(json_text)
+            return json.loads(match.group())
         except Exception as e:
             print("JSON PARSE ERROR:", e)
-            print(json_text)
-
     return {
         "case_title": "Not clearly mentioned",
         "court": "Not clearly mentioned",
@@ -70,7 +75,7 @@ def _extract_json(text):
     }
 
 
-def suggested_actions(case: dict):
+def suggested_actions(case: dict) -> list:
     tags = []
     if case.get("constitutional_articles"):
         tags.append("Constitutional issues detected")
@@ -85,34 +90,44 @@ def suggested_actions(case: dict):
     return tags
 
 
-def generate_brief_from_bytes(file_bytes, filename, user_id: str = None):
+def _extract_pdf_text(file_bytes: bytes, max_chars: int = 4000) -> str:
+    """Extract text from PDF bytes using PyMuPDF."""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
         temp_path = tmp.name
-
     try:
         doc = fitz.open(temp_path)
-
-        full_text = ""
-
+        text = ""
         for page in doc:
-            full_text += page.get_text()
-
+            text += page.get_text()
+            if len(text) >= max_chars:
+                break
         doc.close()
-        prompt = BRIEF_PROMPT.format(text=full_text[:2000])
-        response = llm.complete(prompt)
-        print(response)
-        brief = _extract_json(response.text)
-        brief["source_file"] = filename
-        if user_id:
-            log_activity(user_id, "Case Brief Generated", filename)
-        return brief
+        return text[:max_chars]
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
 
-def brief_to_pdf(brief, output_path):
+def generate_brief_from_bytes(file_bytes: bytes, filename: str, user_id: str = None) -> dict:
+    """Generate a structured legal brief using Bedrock DeepSeek with streaming."""
+    text = _extract_pdf_text(file_bytes)
+    prompt = BRIEF_PROMPT.format(text=text)
+
+    # Stream the response and collect chunks
+    full_response = ""
+    for chunk in _llm.stream([HumanMessage(content=prompt)]):
+        full_response += chunk.content
+
+    brief = _extract_json(full_response)
+    brief["source_file"] = filename
+    if user_id:
+        log_activity(user_id, "Case Brief Generated", filename)
+    return brief
+
+
+def brief_to_pdf(brief: dict, output_path: str) -> None:
+    """Render a case brief dict to a PDF file."""
     doc = SimpleDocTemplate(output_path, pagesize=A4, rightMargin=2 * cm, leftMargin=2 * cm)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
@@ -130,10 +145,11 @@ def brief_to_pdf(brief, output_path):
     )
     body = styles["BodyText"]
 
-    story = []
-    story.append(Paragraph("JurisAI — Case Brief", title_style))
-    story.append(Paragraph(brief.get("case_title", "—"), styles["Heading2"]))
-    story.append(Spacer(1, 12))
+    story = [
+        Paragraph("JurisAI — Case Brief", title_style),
+        Paragraph(brief.get("case_title", "—"), styles["Heading2"]),
+        Spacer(1, 12),
+    ]
 
     sections = [
         ("Court", brief.get("court")),

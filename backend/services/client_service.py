@@ -9,55 +9,78 @@ def _now():
 
 
 def list_clients(user_id: str, search: str = ""):
+    """List clients with case_count in a single JOIN — no N+1, search via SQL ILIKE."""
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM clients WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        ).fetchall()
-    clients = [row_to_dict(r) for r in rows]
-    if search:
-        s = search.lower()
-        clients = [
-            c for c in clients
-            if s in (c.get("name") or "").lower()
-            or s in (c.get("email") or "").lower()
-        ]
-    for c in clients:
-        c["case_count"] = count_client_cases(user_id, c["id"])
-    return clients
+        cur = conn.cursor()
+        if search:
+            cur.execute(
+                """
+                SELECT cl.*, COUNT(c.id) AS case_count
+                FROM clients cl
+                LEFT JOIN cases c ON c.client_id = cl.id AND c.user_id = cl.user_id
+                WHERE cl.user_id = %s
+                  AND (cl.name ILIKE %s OR cl.email ILIKE %s)
+                GROUP BY cl.id
+                ORDER BY cl.created_at DESC
+                """,
+                (user_id, f"%{search}%", f"%{search}%"),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT cl.*, COUNT(c.id) AS case_count
+                FROM clients cl
+                LEFT JOIN cases c ON c.client_id = cl.id AND c.user_id = cl.user_id
+                WHERE cl.user_id = %s
+                GROUP BY cl.id
+                ORDER BY cl.created_at DESC
+                """,
+                (user_id,),
+            )
+        rows = cur.fetchall()
+        cur.close()
+    return [dict(r) for r in rows]
 
 
 def count_client_cases(user_id: str, client_id: str):
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) as n FROM cases WHERE user_id = ? AND client_id = ?",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) as n FROM cases WHERE user_id = %s AND client_id = %s",
             (user_id, client_id),
-        ).fetchone()
+        )
+        row = cur.fetchone()
+        cur.close()
     return row["n"] if row else 0
 
 
 def get_client(user_id: str, client_id: str):
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM clients WHERE id = ? AND user_id = ?",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM clients WHERE id = %s AND user_id = %s",
             (client_id, user_id),
-        ).fetchone()
+        )
+        row = cur.fetchone()
+        cur.close()
     return row_to_dict(row)
 
 
 def create_client(user_id: str, data: dict):
     cid = str(uuid.uuid4())[:10]
     with get_conn() as conn:
-        conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             """INSERT INTO clients
             (id, user_id, name, phone, email, address, advocate, jurisdiction, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 cid, user_id, data.get("name", "").strip(),
                 data.get("phone"), data.get("email"), data.get("address"),
                 data.get("advocate"), data.get("jurisdiction"), _now(),
             ),
         )
+        cur.close()
     return get_client(user_id, cid)
 
 
@@ -66,9 +89,10 @@ def update_client(user_id: str, client_id: str, data: dict):
     if not client:
         return None
     with get_conn() as conn:
-        conn.execute(
-            """UPDATE clients SET name=?, phone=?, email=?, address=?,
-            advocate=?, jurisdiction=? WHERE id=? AND user_id=?""",
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE clients SET name=%s, phone=%s, email=%s, address=%s,
+            advocate=%s, jurisdiction=%s WHERE id=%s AND user_id=%s""",
             (
                 data.get("name", client["name"]),
                 data.get("phone", client.get("phone")),
@@ -79,12 +103,16 @@ def update_client(user_id: str, client_id: str, data: dict):
                 client_id, user_id,
             ),
         )
+        cur.close()
     return get_client(user_id, client_id)
 
 
 def count_clients(user_id: str):
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) as n FROM clients WHERE user_id = ?", (user_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) as n FROM clients WHERE user_id = %s", (user_id,)
+        )
+        row = cur.fetchone()
+        cur.close()
     return row["n"] if row else 0

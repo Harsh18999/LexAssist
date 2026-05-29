@@ -11,15 +11,24 @@ if ROOT not in sys.path:
 
 from backend.api.auth_routes import router as auth_router
 from backend.api.routes import router
+from backend.middleware.latency import LatencyMiddleware
 
-app = FastAPI(title="JurisAI API", version="2.0.0")
+app = FastAPI(
+    title="JurisAI API",
+    version="2.0.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+)
 
+# ── Middleware (order matters: first added = outermost) ──────────────────────
+app.add_middleware(LatencyMiddleware)          # stamp X-Response-Time on every call
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Response-Time", "X-Total-Count"],
 )
 
 app.include_router(auth_router, prefix="/api")
@@ -29,7 +38,6 @@ app.include_router(router, prefix="/api")
 @app.on_event("startup")
 def on_startup():
     from backend.db.database import init_db
-
     init_db()
 
 

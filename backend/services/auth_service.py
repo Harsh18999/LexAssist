@@ -44,25 +44,30 @@ def register(email: str, password: str, name: str):
     email = email.strip().lower()
     user_id = str(uuid.uuid4())[:12]
     with get_conn() as conn:
-        if conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone():
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+        if cur.fetchone():
+            cur.close()
             raise ValueError("Email already registered")
-        conn.execute(
-            "INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?, ?, ?, ?, ?)",
+        cur.execute(
+            "INSERT INTO users (id, email, password_hash, name, created_at) VALUES (%s, %s, %s, %s, %s)",
             (user_id, email, hash_password(password), name.strip(), _now()),
         )
-        conn.execute(
-            "INSERT INTO user_stats (user_id) VALUES (?)",
+        cur.execute(
+            "INSERT INTO user_stats (user_id) VALUES (%s)",
             (user_id,),
         )
+        cur.close()
     return get_user(user_id)
 
 
 def login(email: str, password: str):
     email = email.strip().lower()
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM users WHERE email = ?", (email,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+        row = cur.fetchone()
+        cur.close()
     if not row or not verify_password(password, row["password_hash"]):
         raise ValueError("Invalid email or password")
     return row_to_dict(row)
@@ -70,5 +75,8 @@ def login(email: str, password: str):
 
 def get_user(user_id: str):
     with get_conn() as conn:
-        row = conn.execute("SELECT id, email, name, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT id, email, name, created_at FROM users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+        cur.close()
     return row_to_dict(row)
