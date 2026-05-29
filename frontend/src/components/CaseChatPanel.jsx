@@ -2,26 +2,94 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { api, formatTime } from "../api/client";
 
 const SUGGESTIONS = [
-  "Explain this judgment simply",
+  "Explain this case simply",
   "What precedent was cited?",
   "What was the final ruling?",
-  "Explain Article 21 implication",
+  "What acts/sections apply?",
 ];
 
-function TypingIndicator() {
+/* ── Simple markdown renderer ───────────────────────────────────── */
+function renderMarkdown(text) {
+  if (!text) return "";
+  // Escape HTML
+  let s = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // Code blocks
+  s = s.replace(/```[\s\S]*?```/g, (m) => {
+    const inner = m.slice(3, -3).replace(/^[a-z]*\n/, "");
+    return `<pre style="background:rgba(0,0,0,0.18);border-radius:0.4rem;padding:0.6rem 0.8rem;overflow-x:auto;font-size:0.78rem;margin:0.4rem 0"><code>${inner}</code></pre>`;
+  });
+  // Inline code
+  s = s.replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.18);border-radius:0.2rem;padding:0.05em 0.3em;font-size:0.85em">$1</code>');
+  // Bold
+  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // Italic
+  s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  // Headings
+  s = s.replace(/^### (.+)$/gm, '<h4 style="margin:0.7rem 0 0.2rem;font-size:0.92rem;font-weight:700">$1</h4>');
+  s = s.replace(/^## (.+)$/gm, '<h3 style="margin:0.8rem 0 0.25rem;font-size:1rem;font-weight:700">$1</h3>');
+  s = s.replace(/^# (.+)$/gm, '<h2 style="margin:0.8rem 0 0.3rem;font-size:1.1rem;font-weight:700">$1</h2>');
+  // Unordered lists
+  s = s.replace(/^[-•] (.+)$/gm, '<li style="margin:0.15rem 0 0.15rem 1rem">$1</li>');
+  s = s.replace(/(<li[^>]*>.*<\/li>\n?)+/gs, (m) => `<ul style="padding-left:0.5rem;margin:0.25rem 0">${m}</ul>`);
+  // Ordered lists
+  s = s.replace(/^\d+\. (.+)$/gm, '<li style="margin:0.15rem 0 0.15rem 1rem">$1</li>');
+  // Horizontal rule
+  s = s.replace(/^---$/gm, '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:0.5rem 0"/>');
+  // Paragraphs (blank-line separated)
+  s = s.replace(/\n\n/g, "</p><p style=\"margin:0.35rem 0\">");
+  s = `<p style="margin:0">${s}</p>`;
+  // Single newlines → <br>
+  s = s.replace(/\n/g, "<br/>");
+  return s;
+}
+
+function MarkdownContent({ content, isUser }) {
+  if (isUser) return <span style={{ whiteSpace: "pre-wrap" }}>{content}</span>;
   return (
-    <div style={{ display: "flex", gap: "0.3rem", alignItems: "center", padding: "0.5rem 0.75rem" }}>
-      {[0, 0.2, 0.4].map((delay, i) => (
-        <span
-          key={i}
-          style={{
-            width: 7, height: 7, borderRadius: "50%",
+    <div
+      style={{ lineHeight: 1.65 }}
+      dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+    />
+  );
+}
+
+/* ── Typing / status indicator ──────────────────────────────────── */
+function StatusIndicator({ status }) {
+  const icons = {
+    "Thinking…": "🧠",
+    "Searching documents…": "🔍",
+    "Fetching case info…": "📋",
+    "Writing response…": "✍️",
+  };
+  const icon = icons[status] || "🔄";
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: "0.5rem",
+      padding: "0.45rem 0.7rem",
+      background: "rgba(99,102,241,0.08)",
+      borderRadius: "0.5rem",
+      border: "1px solid rgba(99,102,241,0.18)",
+      fontSize: "0.78rem",
+      color: "var(--muted)",
+      marginBottom: "0.4rem",
+      animation: "statusPulse 1.8s ease-in-out infinite",
+    }}>
+      <span style={{ fontSize: "0.9rem" }}>{icon}</span>
+      <span>{status}</span>
+      <span style={{ display: "flex", gap: "0.2rem", marginLeft: "auto" }}>
+        {[0, 0.2, 0.4].map((d, i) => (
+          <span key={i} style={{
+            width: 5, height: 5, borderRadius: "50%",
             background: "var(--accent)",
             display: "inline-block",
-            animation: `dot-bounce 1.2s infinite ${delay}s`,
-          }}
-        />
-      ))}
+            animation: `dot-bounce 1.2s infinite ${d}s`,
+          }} />
+        ))}
+      </span>
     </div>
   );
 }
@@ -32,31 +100,32 @@ function MessageBubble({ msg }) {
     <div style={{
       display: "flex",
       justifyContent: isUser ? "flex-end" : "flex-start",
-      marginBottom: "0.55rem",
+      marginBottom: "0.6rem",
+      animation: "msgFade 0.18s ease",
     }}>
       {!isUser && (
         <div style={{
-          width: 22, height: 22, borderRadius: "50%",
+          width: 24, height: 24, borderRadius: "50%",
           background: "linear-gradient(135deg, var(--accent), #a78bfa)",
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: "0.65rem", flexShrink: 0, marginRight: "0.35rem", marginTop: "0.1rem",
+          fontSize: "0.65rem", flexShrink: 0, marginRight: "0.4rem", marginTop: "0.15rem",
+          color: "#fff",
         }}>⚖</div>
       )}
       <div style={{
-        maxWidth: "84%",
+        maxWidth: "85%",
         background: isUser
           ? "linear-gradient(135deg, var(--accent), #6366f1)"
           : "var(--bg-elevated)",
         color: isUser ? "#fff" : "var(--text)",
-        borderRadius: isUser ? "0.8rem 0.8rem 0.2rem 0.8rem" : "0.8rem 0.8rem 0.8rem 0.2rem",
-        padding: "0.5rem 0.7rem",
+        borderRadius: isUser ? "0.85rem 0.85rem 0.2rem 0.85rem" : "0.85rem 0.85rem 0.85rem 0.2rem",
+        padding: "0.55rem 0.8rem",
         fontSize: "0.83rem",
-        lineHeight: 1.55,
-        whiteSpace: "pre-wrap",
+        lineHeight: 1.6,
         border: isUser ? "none" : "1px solid var(--border)",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+        boxShadow: isUser ? "0 2px 8px rgba(99,102,241,0.25)" : "0 1px 3px rgba(0,0,0,0.1)",
       }}>
-        {msg.content}
+        <MarkdownContent content={msg.content} isUser={isUser} />
       </div>
     </div>
   );
@@ -68,6 +137,7 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
   const [showThreadList, setShowThreadList] = useState(false);
   const [messages, setMessages] = useState([]);
   const [streamingText, setStreamingText] = useState("");
+  const [aiStatus, setAiStatus] = useState(""); // "Thinking…" | "Searching…" | etc.
   const [citations, setCitations] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -78,15 +148,14 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
   const msgsEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Load threads for this case on mount
+  // Load threads for this case (mode = "CASE")
   useEffect(() => {
     if (!caseId) return;
-    api.threads("case", caseId)
+    api.threads("CASE", caseId)
       .then(async (d) => {
         let list = d.threads || [];
         if (list.length === 0) {
-          // Auto-create a default thread for this case
-          const t = await api.defaultThread("case", caseId);
+          const t = await api.defaultThread("CASE", caseId);
           list = [t];
         }
         setThreads(list);
@@ -97,16 +166,17 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
 
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingText]);
+  }, [messages, streamingText, aiStatus]);
 
   async function loadThread(t) {
     setActiveThread(t);
     setMessages([]);
     setCitations([]);
     setStreamingText("");
+    setAiStatus("");
     setHistoryLoading(true);
     try {
-      const d = await api.threadHistory(t.id, "case", caseId);
+      const d = await api.threadHistory(t.id, "CASE", caseId);
       setMessages(d.messages || []);
     } catch {
       setMessages([]);
@@ -120,7 +190,7 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
     setCreating(true);
     try {
       const title = `Thread ${threads.length + 1}`;
-      const t = await api.createThread("case", title, caseId);
+      const t = await api.createThread("CASE", title, caseId);
       setThreads((prev) => [t, ...prev]);
       loadThread(t);
       setShowThreadList(false);
@@ -146,6 +216,7 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
     setLoading(true);
     if (!text) setQuery("");
     setStreamingText("");
+    setAiStatus("");
     setCitations([]);
 
     const userMsg = { role: "user", content: q, timestamp: new Date().toISOString() };
@@ -155,19 +226,21 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
 
     ctrlRef.current = api.streamChatV2(
       activeThread.id,
-      "case",
+      "CASE",
       q,
       caseId,
       // onChunk
       (token) => {
         accumulated += token;
         setStreamingText(accumulated);
+        setAiStatus(""); // clear status once content arrives
       },
       // onDone
       (evt) => {
         const aiMsg = { role: "assistant", content: accumulated, timestamp: new Date().toISOString() };
         setMessages((prev) => [...prev, aiMsg]);
         setStreamingText("");
+        setAiStatus("");
         setCitations(evt.citations || []);
         setLoading(false);
         setThreads((prev) =>
@@ -182,11 +255,16 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
       // onError
       (err) => {
         setStreamingText("");
+        setAiStatus("");
         setMessages((prev) => [
           ...prev,
           { role: "assistant", content: `⚠ ${err.message}`, timestamp: new Date().toISOString() },
         ]);
         setLoading(false);
+      },
+      // onStatus
+      (status) => {
+        setAiStatus(status);
       }
     );
   }, [query, loading, activeThread, caseId]);
@@ -199,22 +277,39 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
           40% { transform: scale(1); opacity: 1; }
         }
         @keyframes cursor-blink { 50% { opacity: 0; } }
+        @keyframes msgFade {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: none; }
+        }
+        @keyframes statusPulse {
+          0%, 100% { opacity: 0.85; }
+          50% { opacity: 1; }
+        }
         .case-thread-item { cursor: pointer; border-radius: 0.5rem; padding: 0.35rem 0.5rem; transition: background 0.15s; }
         .case-thread-item:hover { background: rgba(99,102,241,0.12); }
         .case-thread-item.active-t { background: rgba(99,102,241,0.2); }
+        .chat-panel-cite:hover { background: rgba(99,102,241,0.08) !important; }
       `}</style>
 
       {/* Panel header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.45rem" }}>
         <div>
-          <h3 style={{ fontSize: "0.95rem", margin: 0, fontWeight: 700 }}>Case AI Co-pilot</h3>
-          <p className="meta" style={{ marginBottom: 0, fontSize: "0.75rem" }}>
+          <h3 style={{ fontSize: "0.95rem", margin: 0, fontWeight: 700, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <span style={{
+              width: 20, height: 20, borderRadius: "0.35rem",
+              background: "linear-gradient(135deg, #1e1b4b, #4338ca)",
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              fontSize: "0.6rem", color: "#fff",
+            }}>⚖</span>
+            Case AI Co-pilot
+          </h3>
+          <p className="meta" style={{ marginBottom: 0, fontSize: "0.72rem" }}>
             {activeThread ? `Thread: ${activeThread.title}` : "Loading…"}
           </p>
         </div>
         <button
           className="btn btn-ghost btn-sm"
-          style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}
+          style={{ fontSize: "0.72rem", padding: "0.2rem 0.5rem" }}
           onClick={() => setShowThreadList((v) => !v)}
           title="Manage threads"
         >
@@ -225,19 +320,15 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
       {/* Thread list dropdown */}
       {showThreadList && (
         <div style={{
-          background: "var(--bg-elevated)",
-          border: "1px solid var(--border)",
-          borderRadius: "0.6rem",
-          padding: "0.5rem",
-          marginBottom: "0.5rem",
-          maxHeight: 180,
-          overflowY: "auto",
+          background: "var(--bg-elevated)", border: "1px solid var(--border)",
+          borderRadius: "0.6rem", padding: "0.5rem", marginBottom: "0.5rem",
+          maxHeight: 180, overflowY: "auto",
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.35rem" }}>
-            <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>
+            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>
               Threads
             </span>
-            <button className="btn btn-primary btn-sm" style={{ fontSize: "0.72rem", padding: "0.15rem 0.45rem" }} onClick={createThread} disabled={creating}>
+            <button className="btn btn-primary btn-sm" style={{ fontSize: "0.7rem", padding: "0.15rem 0.45rem" }} onClick={createThread} disabled={creating}>
               {creating ? <span className="spinner" /> : "+ New"}
             </button>
           </div>
@@ -248,12 +339,12 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
               style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}
               onClick={() => { loadThread(t); setShowThreadList(false); }}
             >
-              <span style={{ flex: 1, fontSize: "0.8rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ flex: 1, fontSize: "0.78rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {t.title}
               </span>
               <button
                 className="btn btn-ghost btn-sm"
-                style={{ fontSize: "0.7rem", padding: "0.1rem 0.25rem", color: "#ef4444", flexShrink: 0 }}
+                style={{ fontSize: "0.68rem", padding: "0.1rem 0.25rem", color: "#ef4444", flexShrink: 0 }}
                 onClick={(e) => { e.stopPropagation(); deleteThread(t.id); }}
                 title="Delete thread"
               >🗑</button>
@@ -263,15 +354,14 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
       )}
 
       {/* Suggestion chips */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginBottom: "0.55rem" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginBottom: "0.5rem" }}>
         {SUGGESTIONS.map((s) => (
           <button
-            key={s}
-            type="button"
+            key={s} type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => send(s)}
             disabled={loading || !activeThread}
-            style={{ fontSize: "0.73rem" }}
+            style={{ fontSize: "0.7rem" }}
           >
             {s}
           </button>
@@ -286,30 +376,61 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
           </div>
         ) : !activeThread ? (
           <p className="meta" style={{ padding: "0.5rem 0", fontSize: "0.8rem" }}>Loading thread…</p>
-        ) : messages.length === 0 && !streamingText ? (
+        ) : messages.length === 0 && !streamingText && !aiStatus ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1.5rem 0.5rem", color: "var(--muted)" }}>
             <div style={{ fontSize: "1.8rem", marginBottom: "0.4rem" }}>⚖</div>
-            <div style={{ fontSize: "0.82rem", textAlign: "center" }}>Ask about this case…</div>
+            <div style={{ fontSize: "0.82rem", textAlign: "center" }}>Ask anything about this case</div>
             {caseTitle && (
-              <div style={{ fontSize: "0.75rem", marginTop: "0.2rem", color: "var(--muted)", fontStyle: "italic" }}>
+              <div style={{ fontSize: "0.72rem", marginTop: "0.2rem", color: "var(--muted)", fontStyle: "italic" }}>
                 {caseTitle}
               </div>
             )}
+            <div style={{ marginTop: "0.75rem", display: "flex", flexWrap: "wrap", gap: "0.3rem", justifyContent: "center", maxWidth: 240 }}>
+              {["fetch_case_info", "search_case_docs", "search_bns", "search_bnss"].map((tool) => (
+                <span key={tool} style={{
+                  fontSize: "0.58rem", padding: "0.1rem 0.35rem",
+                  borderRadius: "0.3rem", background: "rgba(67,56,202,0.1)",
+                  color: "#818cf8", fontFamily: "monospace",
+                  border: "1px solid rgba(67,56,202,0.15)",
+                }}>{tool}</span>
+              ))}
+            </div>
           </div>
         ) : (
           <>
             {messages.map((m, i) => <MessageBubble key={i} msg={m} />)}
 
+            {/* Real-time status indicator */}
+            {aiStatus && !streamingText && (
+              <StatusIndicator status={aiStatus} />
+            )}
+
+            {/* Streaming text bubble */}
             {streamingText && (
-              <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: "0.55rem" }}>
-                <div style={{ width: 22, height: 22, borderRadius: "50%", background: "linear-gradient(135deg, var(--accent), #a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", flexShrink: 0, marginRight: "0.35rem", marginTop: "0.1rem" }}>⚖</div>
-                <div style={{ maxWidth: "84%", background: "var(--bg-elevated)", borderRadius: "0.8rem 0.8rem 0.8rem 0.2rem", padding: "0.5rem 0.7rem", fontSize: "0.83rem", lineHeight: 1.55, whiteSpace: "pre-wrap", border: "1px solid var(--border)" }}>
-                  {streamingText}
-                  <span style={{ display: "inline-block", width: 2, height: "1em", background: "var(--accent)", marginLeft: 2, animation: "cursor-blink 0.8s step-end infinite", verticalAlign: "text-bottom" }} />
+              <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: "0.6rem" }}>
+                <div style={{
+                  width: 24, height: 24, borderRadius: "50%",
+                  background: "linear-gradient(135deg, var(--accent), #a78bfa)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: "0.65rem", flexShrink: 0, marginRight: "0.4rem", marginTop: "0.15rem",
+                  color: "#fff",
+                }}>⚖</div>
+                <div style={{
+                  maxWidth: "85%", background: "var(--bg-elevated)",
+                  borderRadius: "0.85rem 0.85rem 0.85rem 0.2rem",
+                  padding: "0.55rem 0.8rem", fontSize: "0.83rem", lineHeight: 1.6,
+                  border: "1px solid var(--border)", boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                }}>
+                  <MarkdownContent content={streamingText} isUser={false} />
+                  <span style={{
+                    display: "inline-block", width: 2, height: "1em",
+                    background: "var(--accent)", marginLeft: 2,
+                    animation: "cursor-blink 0.8s step-end infinite",
+                    verticalAlign: "text-bottom",
+                  }} />
                 </div>
               </div>
             )}
-            {loading && !streamingText && <TypingIndicator />}
           </>
         )}
         <div ref={msgsEndRef} />
@@ -321,10 +442,10 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
           ref={inputRef}
           className="input"
           style={{ marginBottom: 0, flex: 1 }}
-          placeholder={activeThread ? "Legal research question…" : "Loading…"}
+          placeholder={activeThread ? "Ask about this case…" : "Loading…"}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
           disabled={loading || !activeThread}
         />
         <button
@@ -340,12 +461,30 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
 
       {/* Citations */}
       {citations.length > 0 && (
-        <div style={{ marginTop: "0.65rem" }}>
-          <div className="label" style={{ marginBottom: "0.3rem", fontSize: "0.7rem" }}>CITATIONS</div>
+        <div style={{ marginTop: "0.7rem", borderTop: "1px solid var(--border)", paddingTop: "0.6rem" }}>
+          <div style={{
+            fontSize: "0.65rem", fontWeight: 700, color: "var(--muted)",
+            textTransform: "uppercase", letterSpacing: "0.06em",
+            marginBottom: "0.4rem", display: "flex", alignItems: "center", gap: "0.35rem",
+          }}>
+            📎 Sources
+            <span style={{
+              background: "var(--bg-elevated)", border: "1px solid var(--border)",
+              borderRadius: "1rem", padding: "0.05rem 0.35rem", fontSize: "0.65rem", fontWeight: 600,
+            }}>{citations.length}</span>
+          </div>
           {citations.map((c, i) => (
-            <div key={i} className="cite" style={{ marginBottom: "0.4rem" }}>
-              <strong style={{ fontSize: "0.73rem", color: "var(--accent)" }}>{c.file_name}</strong>
-              <p style={{ fontSize: "0.71rem", marginTop: "0.1rem", color: "var(--muted)" }}>{c.snippet}</p>
+            <div key={i} className="chat-panel-cite" style={{
+              marginBottom: "0.4rem", padding: "0.45rem 0.6rem",
+              background: "var(--bg-elevated)", borderRadius: "0.45rem",
+              border: "1px solid var(--border)", transition: "background 0.12s",
+            }}>
+              <strong style={{ fontSize: "0.72rem", display: "block", marginBottom: "0.1rem", color: "var(--accent)" }}>
+                {c.file_name}
+              </strong>
+              <p style={{ fontSize: "0.69rem", marginTop: "0.05rem", color: "var(--muted)", lineHeight: 1.45, margin: 0 }}>
+                {c.snippet}
+              </p>
             </div>
           ))}
         </div>

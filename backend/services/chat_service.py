@@ -173,6 +173,8 @@ async def stream_thread_query(
             if event["type"] == "chunk":
                 final_answer += event["content"]
                 yield f"data: {json.dumps({'type': 'chunk', 'content': event['content']})}\n\n"
+            elif event["type"] == "status":
+                yield f"data: {json.dumps({'type': 'status', 'content': event['content']})}\n\n"
             elif event["type"] == "done":
                 citations = event.get("citations", [])
                 final_answer = event.get("final_answer", final_answer)

@@ -110,6 +110,25 @@ class CaseRequest(BaseModel):
     advocate: str = ""
 
 
+class CaseUpdateRequest(BaseModel):
+    """Partial update — all fields optional."""
+    client_id: str | None = None
+    title: str | None = None
+    case_number: str | None = None
+    court: str | None = None
+    filing_date: str | None = None
+    judgment_date: str | None = None
+    case_type: str | None = None
+    petitioner: str | None = None
+    respondent: str | None = None
+    judges: str | None = None
+    status: str | None = None
+    acts_involved: str | None = None
+    constitutional_articles: str | None = None
+    hearing_date: str | None = None
+    advocate: str | None = None
+
+
 class NoteRequest(BaseModel):
     content: str
 
@@ -253,8 +272,10 @@ def get_case(case_id: str, user=Depends(get_current_user)):
 
 
 @router.patch("/cases/{case_id}")
-def update_case(case_id: str, req: CaseRequest, user=Depends(get_current_user)):
-    data = {k: v for k, v in req.model_dump().items() if v is not None and v != ""}
+def update_case(case_id: str, req: CaseUpdateRequest, user=Depends(get_current_user)):
+    data = {k: v for k, v in req.model_dump().items() if v is not None}
+    if not data:
+        raise HTTPException(400, "No fields provided to update")
     case = case_service.update_case(user["id"], case_id, data)
     if not case:
         raise HTTPException(404, "Case not found")

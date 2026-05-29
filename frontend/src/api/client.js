@@ -364,8 +364,9 @@ export const api = {
 
   /**
    * LangGraph-backed streaming chat (primary path).
+   * @param onStatus - called with status string (e.g. "Thinking…", "Searching…")
    */
-  streamChatV2: (threadId, mode, query, caseId, onChunk, onDone, onError) => {
+  streamChatV2: (threadId, mode, query, caseId, onChunk, onDone, onError, onStatus) => {
     const token = getToken();
     const ctrl = new AbortController();
     fetch(`${API}/chat/stream`, {
@@ -401,6 +402,7 @@ export const api = {
           try {
             const evt = JSON.parse(line.slice(6));
             if (evt.type === "chunk") onChunk && onChunk(evt.content);
+            else if (evt.type === "status") onStatus && onStatus(evt.content);
             else if (evt.type === "done") onDone && onDone(evt);
             else if (evt.type === "error") onError && onError(new Error(evt.content));
           } catch {}

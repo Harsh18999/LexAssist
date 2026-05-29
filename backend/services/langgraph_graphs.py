@@ -519,6 +519,7 @@ async def run_graph_streaming(
     Stream events from the LangGraph graph for the given thread.
 
     Yields dicts:
+      {"type": "status",  "content": "Thinking…" | "Searching…" | "Writing…"}
       {"type": "chunk",  "content": "..."}
       {"type": "done",   "citations": [...], "final_answer": "..."}
       {"type": "error",  "content": "..."}
@@ -538,13 +539,23 @@ async def run_graph_streaming(
 
     final_answer = ""
     citations: list[dict] = []
+    has_started_writing = False
 
     try:
+        # Emit initial thinking status
+        yield {"type": "status", "content": "Thinking…"}
+
         async for event in graph.astream(input_state, config=config, stream_mode="updates"):
             # Each event is {node_name: updated_state_slice}
             for node_name, node_output in event.items():
-                if node_name == "generate":
+                if node_name == "retrieve":
+                    yield {"type": "status", "content": "Searching documents…"}
+
+                elif node_name == "generate":
                     # RAG modes (MAIN / source-filtered)
+                    if not has_started_writing:
+                        yield {"type": "status", "content": "Writing response…"}
+                        has_started_writing = True
                     answer = node_output.get("final_answer", "")
                     if answer and answer != final_answer:
                         delta = answer[len(final_answer):]
@@ -569,6 +580,9 @@ async def run_graph_streaming(
                                 ]
                                 content = "".join(text_parts)
                             if content and content != final_answer:
+                                if not has_started_writing:
+                                    yield {"type": "status", "content": "Writing response…"}
+                                    has_started_writing = True
                                 delta = content[len(final_answer):]
                                 if delta:
                                     yield {"type": "chunk", "content": delta}
@@ -580,7 +594,19 @@ async def run_graph_streaming(
                     for msg in msgs:
                         if isinstance(msg, ToolMessage):
                             name = getattr(msg, "name", "") or ""
-                            if name.startswith("search_"):
+                            if name == "fetch_case_info":
+                                yield {"type": "status", "content": "Fetching case info…"}
+                            elif name.startswith("search_"):
+                                tool_label = {
+                                    "search_case_docs": "Searching case documents…",
+                                    "search_all_laws": "Searching all laws…",
+                                    "search_bns": "Searching BNS…",
+                                    "search_bnss": "Searching BNSS…",
+                                    "search_bsa": "Searching BSA…",
+                                    "search_constitution": "Searching Constitution…",
+                                    "search_it_act": "Searching IT Act…",
+                                }.get(name, f"Searching ({name})…")
+                                yield {"type": "status", "content": tool_label}
                                 # Parse tool output into citation snippets
                                 raw = msg.content or ""
                                 if raw and raw != "No matching" and "not found" not in raw.lower():

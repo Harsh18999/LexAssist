@@ -5,21 +5,86 @@ import { api, formatRelativeTime } from "../api/client";
    Sub-components
 ───────────────────────────────────────────── */
 
-function TypingIndicator() {
+
+
+
+/* ── Markdown renderer ──────────────────────────────────────── */
+function renderMarkdown(text) {
+  if (!text) return "";
+  let s = text
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  s = s.replace(/```[\s\S]*?```/g, (m) => {
+    const inner = m.slice(3, -3).replace(/^[a-z]*\n/, "");
+    return `<pre style="background:rgba(0,0,0,0.18);border-radius:0.45rem;padding:0.65rem 0.9rem;overflow-x:auto;font-size:0.79rem;margin:0.4rem 0"><code>${inner}</code></pre>`;
+  });
+  s = s.replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.18);border-radius:0.2rem;padding:0.05em 0.3em;font-size:0.85em">$1</code>');
+  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  s = s.replace(/^### (.+)$/gm, '<h4 style="margin:0.7rem 0 0.25rem;font-size:0.93rem;font-weight:700">$1</h4>');
+  s = s.replace(/^## (.+)$/gm, '<h3 style="margin:0.8rem 0 0.3rem;font-size:1rem;font-weight:700">$1</h3>');
+  s = s.replace(/^# (.+)$/gm, '<h2 style="margin:0.8rem 0 0.35rem;font-size:1.1rem;font-weight:700">$1</h2>');
+  s = s.replace(/^[-•] (.+)$/gm, '<li style="margin:0.15rem 0 0.15rem 1.1rem">$1</li>');
+  s = s.replace(/(<li[^>]*>[\s\S]*?<\/li>\n?)+/gs, (m) => `<ul style="padding-left:0.25rem;margin:0.3rem 0">${m}</ul>`);
+  s = s.replace(/^\d+\. (.+)$/gm, '<li style="margin:0.15rem 0 0.15rem 1.1rem">$1</li>');
+  s = s.replace(/^---$/gm, '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:0.6rem 0"/>');
+  s = s.replace(/\n\n/g, '</p><p style="margin:0.35rem 0">');
+  s = `<p style="margin:0">${s}</p>`;
+  s = s.replace(/\n/g, "<br/>");
+  return s;
+}
+
+function MarkdownContent({ content, isUser }) {
+  if (isUser) return <span style={{ whiteSpace: "pre-wrap" }}>{content}</span>;
   return (
-    <div style={{ display: "flex", gap: "0.4rem", alignItems: "center", padding: "0.7rem 1rem" }}>
-      {[0, 0.2, 0.4].map((delay, i) => (
-        <span
-          key={i}
-          style={{
-            width: 7, height: 7, borderRadius: "50%",
-            background: "var(--accent)",
-            display: "inline-block",
-            animation: `dot-bounce 1.2s infinite ${delay}s`,
-            opacity: 0.7,
-          }}
-        />
-      ))}
+    <div
+      style={{ lineHeight: 1.65 }}
+      dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+    />
+  );
+}
+
+/* ── Real-time status chip ───────────────────────────────────── */
+function AIStatusChip({ status }) {
+  const icons = {
+    "Thinking…": "🧠", "Searching documents…": "🔍",
+    "Fetching case info…": "📋", "Writing response…": "✍️",
+    "Searching BNS…": "📖", "Searching BNSS…": "⚡",
+    "Searching BSA…": "🔏", "Searching Constitution…": "🏛️",
+    "Searching IT Act…": "💻", "Searching case documents…": "📂",
+    "Searching all laws…": "⚖️",
+  };
+  const icon = icons[status] || "🔄";
+  return (
+    <div className="msg-enter" style={{
+      display: "flex", justifyContent: "flex-start", marginBottom: "0.5rem",
+    }}>
+      <div style={{
+        width: 28, height: 28, borderRadius: "50%",
+        background: "linear-gradient(135deg, #111, #444)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: "0.75rem", flexShrink: 0, marginRight: "0.5rem", marginTop: "0.1rem", color: "#fff",
+      }}>⚖</div>
+      <div style={{
+        display: "flex", alignItems: "center", gap: "0.5rem",
+        padding: "0.5rem 0.85rem",
+        background: "var(--bg-elevated)",
+        borderRadius: "1rem 1rem 1rem 0.2rem",
+        border: "1px solid var(--border)",
+        fontSize: "0.82rem", color: "var(--muted)",
+        animation: "statusPulse 1.8s ease-in-out infinite",
+      }}>
+        <span>{icon}</span>
+        <span>{status}</span>
+        <span style={{ display: "flex", gap: "0.2rem", marginLeft: "0.25rem" }}>
+          {[0, 0.2, 0.4].map((d, i) => (
+            <span key={i} style={{
+              width: 5, height: 5, borderRadius: "50%",
+              background: "var(--accent)", display: "inline-block",
+              animation: `dot-bounce 1.2s infinite ${d}s`,
+            }} />
+          ))}
+        </span>
+      </div>
     </div>
   );
 }
@@ -239,13 +304,12 @@ function MessageBubble({ msg }) {
         padding: "0.6rem 0.85rem",
         fontSize: "0.875rem",
         lineHeight: 1.65,
-        whiteSpace: "pre-wrap",
         border: isUser ? "none" : "1px solid var(--border)",
         boxShadow: isUser
           ? "0 2px 8px rgba(0,0,0,0.18)"
           : "0 1px 3px rgba(0,0,0,0.06)",
       }}>
-        {msg.content}
+        <MarkdownContent content={msg.content} isUser={isUser} />
       </div>
     </div>
   );
@@ -308,6 +372,7 @@ export default function Research() {
   const [activeThread, setActiveThread] = useState(null);
   const [messages, setMessages] = useState([]);
   const [streamingText, setStreamingText] = useState("");
+  const [aiStatus, setAiStatus] = useState(""); // real-time AI status
   const [citations, setCitations] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -339,6 +404,7 @@ export default function Research() {
     setMessages([]);
     setCitations([]);
     setStreamingText("");
+    setAiStatus("");
 
     api.threads(mode, effectiveCaseId).then((d) => {
       if (cancelled) return;
@@ -368,7 +434,7 @@ export default function Research() {
   // Auto-scroll
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingText]);
+  }, [messages, streamingText, aiStatus]);
 
   async function selectThread(t) {
     if (activeThread?.id === t.id) return;
@@ -376,6 +442,7 @@ export default function Research() {
     setMessages([]);
     setCitations([]);
     setStreamingText("");
+    setAiStatus("");
     setHistoryLoading(true);
     try {
       const d = await api.threadHistory(t.id, t.mode, t.case_id || null);
@@ -428,6 +495,7 @@ export default function Research() {
     setLoading(true);
     setQuery("");
     setStreamingText("");
+    setAiStatus("");
     setCitations([]);
 
     setMessages((prev) => [...prev, { role: "user", content: q, timestamp: new Date().toISOString() }]);
@@ -436,10 +504,15 @@ export default function Research() {
 
     ctrlRef.current = api.streamChatV2(
       activeThread.id, mode, q, effectiveCaseId,
-      (token) => { accumulated += token; setStreamingText(accumulated); },
+      (token) => {
+        accumulated += token;
+        setStreamingText(accumulated);
+        setAiStatus(""); // clear status once content begins
+      },
       (evt) => {
         setMessages((prev) => [...prev, { role: "assistant", content: accumulated, timestamp: new Date().toISOString() }]);
         setStreamingText("");
+        setAiStatus("");
         setCitations(evt.citations || []);
         setLoading(false);
         setThreads((prev) => prev.map((t) =>
@@ -449,9 +522,12 @@ export default function Research() {
       },
       (err) => {
         setStreamingText("");
+        setAiStatus("");
         setMessages((prev) => [...prev, { role: "assistant", content: `⚠ Error: ${err.message}`, timestamp: new Date().toISOString() }]);
         setLoading(false);
-      }
+      },
+      // onStatus
+      (status) => { setAiStatus(status); }
     );
   }, [query, loading, activeThread, mode, selectedCaseId, effectiveCaseId]);
 
@@ -490,6 +566,10 @@ export default function Research() {
         @keyframes msgFade {
           from { opacity: 0; transform: translateY(4px); }
           to { opacity: 1; transform: none; }
+        }
+        @keyframes statusPulse {
+          0%, 100% { opacity: 0.82; }
+          50% { opacity: 1; }
         }
         .msg-enter { animation: msgFade 0.2s ease; }
         .thread-item:hover { background: var(--accent-dim) !important; }
@@ -674,7 +754,7 @@ export default function Research() {
               <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%", color: "var(--muted)", fontSize: "0.85rem" }}>
                 <span className="spinner" style={{ marginRight: "0.5rem" }} /> Loading history…
               </div>
-            ) : messages.length === 0 && !streamingText ? (
+            ) : messages.length === 0 && !streamingText && !aiStatus ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--muted)" }}>
                 <div style={{
                   width: 56, height: 56, borderRadius: "1rem", background: cfg.bg,
@@ -690,6 +770,11 @@ export default function Research() {
             ) : (
               <>
                 {messages.map((m, i) => <MessageBubble key={i} msg={m} />)}
+
+                {/* Real-time status indicator */}
+                {aiStatus && !streamingText && <AIStatusChip status={aiStatus} />}
+
+                {/* Streaming text bubble */}
                 {streamingText && (
                   <div className="msg-enter" style={{ display: "flex", justifyContent: "flex-start", marginBottom: "0.65rem" }}>
                     <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg, #111, #444)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", flexShrink: 0, marginRight: "0.5rem", marginTop: "0.15rem", color: "#fff" }}>⚖</div>
@@ -697,14 +782,13 @@ export default function Research() {
                       maxWidth: "76%", background: "var(--bg-elevated)",
                       borderRadius: "1rem 1rem 1rem 0.2rem",
                       padding: "0.6rem 0.85rem", fontSize: "0.875rem", lineHeight: 1.65,
-                      whiteSpace: "pre-wrap", border: "1px solid var(--border)",
+                      border: "1px solid var(--border)",
                     }}>
-                      {streamingText}
+                      <MarkdownContent content={streamingText} isUser={false} />
                       <span style={{ display: "inline-block", width: 2, height: "1em", background: "var(--accent)", marginLeft: 2, animation: "cursor-blink 0.8s step-end infinite", verticalAlign: "text-bottom" }} />
                     </div>
                   </div>
                 )}
-                {loading && !streamingText && <TypingIndicator />}
               </>
             )}
             <div ref={msgsEndRef} />
