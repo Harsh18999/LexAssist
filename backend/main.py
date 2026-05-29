@@ -14,7 +14,7 @@ from backend.api.routes import router
 from backend.middleware.latency import LatencyMiddleware
 
 app = FastAPI(
-    title="JurisAI API",
+    title="LexAssist API",
     version="2.0.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -41,11 +41,7 @@ def on_startup():
     init_db()
 
 
-@app.get("/api/health")
+@app.get("/")
 def health():
     return {"status": "ok", "service": "JurisAI", "version": "2.0"}
 
-
-frontend_dist = os.path.join(ROOT, "frontend", "dist")
-if os.path.isdir(frontend_dist):
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
