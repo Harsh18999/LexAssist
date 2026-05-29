@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: "https://lex-assist-4cenvys6t-harshs-projects-9878f077.vercel.app",
         changeOrigin: true,
       },
     },

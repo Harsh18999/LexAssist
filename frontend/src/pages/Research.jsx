@@ -79,6 +79,15 @@ const MODE_CONFIG = {
     border: "rgba(51,65,85,0.18)",
     tagBg: "rgba(51,65,85,0.08)",
   },
+  CASE: {
+    label: "Case AI",
+    icon: "🗂️",
+    desc: "AI research scoped to a specific case — uses all 8 legal tools",
+    gradient: "linear-gradient(135deg, #1e1b4b, #4338ca)",
+    bg: "rgba(67,56,202,0.07)",
+    border: "rgba(67,56,202,0.2)",
+    tagBg: "rgba(67,56,202,0.1)",
+  },
 };
 
 /* ─────────────────────────────────────────────
@@ -125,7 +134,7 @@ function ThreadSidebar({ threads, activeThread, onSelect, onCreate, onRename, on
         ) : (
           threads.map((t) => {
             const isActive = activeThread?.id === t.id;
-            const cfg = MODE_CONFIG[t.mode] || MODE_CONFIG.research;
+            const cfg = MODE_CONFIG[t.mode] || MODE_CONFIG.MAIN;
             return (
               <div
                 key={t.id}
@@ -243,11 +252,58 @@ function MessageBubble({ msg }) {
 }
 
 /* ─────────────────────────────────────────────
+   Case selector (for CASE mode)
+───────────────────────────────────────────── */
+
+function CaseSelector({ selectedCaseId, onSelect }) {
+  const [cases, setCases] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.cases("", "", 1, 100)
+      .then((r) => setCases(r.cases || []))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div style={{ marginBottom: "0.5rem" }}>
+      <label style={{
+        fontSize: "0.7rem", fontWeight: 700, color: "var(--muted)",
+        textTransform: "uppercase", letterSpacing: "0.06em",
+        display: "block", marginBottom: "0.3rem",
+      }}>
+        Select Case
+      </label>
+      {loading ? (
+        <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>Loading cases…</div>
+      ) : cases.length === 0 ? (
+        <div style={{ fontSize: "0.78rem", color: "var(--muted)", fontStyle: "italic" }}>No cases found</div>
+      ) : (
+        <select
+          className="select"
+          style={{ marginBottom: 0, fontSize: "0.82rem" }}
+          value={selectedCaseId || ""}
+          onChange={(e) => onSelect(e.target.value || null)}
+        >
+          <option value="">— Pick a case —</option>
+          {cases.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.title}{c.case_number ? ` (#${c.case_number})` : ""}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
    Main Research page
 ───────────────────────────────────────────── */
 
 export default function Research() {
   const [mode, setMode] = useState("MAIN");
+  const [selectedCaseId, setSelectedCaseId] = useState(null); // only for CASE mode
   const [threads, setThreads] = useState([]);
   const [activeThread, setActiveThread] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -263,24 +319,38 @@ export default function Research() {
   const msgsEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Load threads for current mode — only fetch if needed
+  // Effective case_id — only passed when mode is CASE
+  const effectiveCaseId = mode === "CASE" ? selectedCaseId : null;
+
+  // Load threads for current mode (and case when CASE mode)
   useEffect(() => {
+    // In CASE mode, require a case to be selected first
+    if (mode === "CASE" && !selectedCaseId) {
+      setThreads([]);
+      setActiveThread(null);
+      setMessages([]);
+      setThreadsLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setThreadsLoading(true);
+    setActiveThread(null);
+    setMessages([]);
+    setCitations([]);
+    setStreamingText("");
 
-    api.threads(mode, null).then((d) => {
+    api.threads(mode, effectiveCaseId).then((d) => {
       if (cancelled) return;
       const list = d.threads || [];
       setThreads(list);
 
       if (list.length > 0) {
-        // Auto-select first if no active thread or active thread is from different mode
         if (!activeThread || activeThread.mode !== mode) {
           selectThread(list[0]);
         }
       } else {
-        // Auto-create default thread
-        api.defaultThread(mode, null).then((t) => {
+        api.defaultThread(mode, effectiveCaseId).then((t) => {
           if (cancelled) return;
           setThreads([t]);
           selectThread(t);
@@ -293,7 +363,7 @@ export default function Research() {
     });
 
     return () => { cancelled = true; };
-  }, [mode]);
+  }, [mode, selectedCaseId]);
 
   // Auto-scroll
   useEffect(() => {
@@ -301,7 +371,7 @@ export default function Research() {
   }, [messages, streamingText]);
 
   async function selectThread(t) {
-    if (activeThread?.id === t.id) return; // No-op if already selected
+    if (activeThread?.id === t.id) return;
     setActiveThread(t);
     setMessages([]);
     setCitations([]);
@@ -317,12 +387,12 @@ export default function Research() {
     }
   }
 
-  // Debounced create — prevents double-click creating multiples
   const handleCreateThread = useCallback(async () => {
     if (creating) return;
+    if (mode === "CASE" && !selectedCaseId) return;
     setCreating(true);
     try {
-      const t = await api.createThread(mode, "New Conversation", null);
+      const t = await api.createThread(mode, "New Conversation", effectiveCaseId);
       setThreads((prev) => [t, ...prev]);
       setActiveThread(t);
       setMessages([]);
@@ -331,7 +401,7 @@ export default function Research() {
       inputRef.current?.focus();
     } catch {}
     setCreating(false);
-  }, [mode, creating]);
+  }, [mode, creating, selectedCaseId, effectiveCaseId]);
 
   async function handleRename(threadId, newTitle) {
     const updated = await api.renameThread(threadId, newTitle);
@@ -353,6 +423,7 @@ export default function Research() {
   const send = useCallback(() => {
     const q = query.trim();
     if (!q || loading || !activeThread) return;
+    if (mode === "CASE" && !selectedCaseId) return;
 
     setLoading(true);
     setQuery("");
@@ -364,7 +435,7 @@ export default function Research() {
     let accumulated = "";
 
     ctrlRef.current = api.streamChatV2(
-      activeThread.id, mode, q, null,
+      activeThread.id, mode, q, effectiveCaseId,
       (token) => { accumulated += token; setStreamingText(accumulated); },
       (evt) => {
         setMessages((prev) => [...prev, { role: "assistant", content: accumulated, timestamp: new Date().toISOString() }]);
@@ -382,13 +453,31 @@ export default function Research() {
         setLoading(false);
       }
     );
-  }, [query, loading, activeThread, mode]);
+  }, [query, loading, activeThread, mode, selectedCaseId, effectiveCaseId]);
 
   function handleKeyDown(e) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   }
 
-  const cfg = MODE_CONFIG[mode] || MODE_CONFIG.research;
+  function handleModeChange(newMode) {
+    setMode(newMode);
+    if (newMode !== "CASE") setSelectedCaseId(null);
+  }
+
+  const cfg = MODE_CONFIG[mode] || MODE_CONFIG.MAIN;
+
+  const chatDisabled = loading || !activeThread || (mode === "CASE" && !selectedCaseId);
+
+  const placeholder =
+    mode === "CASE" && !selectedCaseId ? "Select a case above first…"
+    : !activeThread ? "Select a conversation…"
+    : mode === "CASE" ? "Ask anything about this case — I'll search case docs + all laws…"
+    : mode === "BNS" ? "Ask about Bharatiya Nyaya Sanhita…"
+    : mode === "BNSS" ? "Ask about Bharatiya Nagarik Suraksha Sanhita…"
+    : mode === "BSA" ? "Ask about Bharatiya Sakshya Adhiniyam…"
+    : mode === "CNT" ? "Ask about the Constitution of India…"
+    : mode === "IT" ? "Ask about the IT Act…"
+    : "Ask about Indian law, judgments, statutes…";
 
   return (
     <>
@@ -413,11 +502,17 @@ export default function Research() {
           background: var(--accent); transition: width 0.2s ease; border-radius: 2px;
         }
         .mode-tab.active::after { width: 60%; }
+        .case-ai-badge {
+          display: inline-flex; align-items: center; gap: 0.3rem;
+          font-size: 0.65rem; padding: 0.15rem 0.45rem; border-radius: 1rem;
+          background: rgba(67,56,202,0.12); color: #818cf8; font-weight: 700;
+          border: 1px solid rgba(67,56,202,0.2);
+        }
       `}</style>
 
       {/* Page header with mode tabs */}
       <header className="page-head" style={{ marginBottom: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
           <div>
             <h2 style={{ marginBottom: "0.15rem" }}>AI Research</h2>
             <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
@@ -430,14 +525,15 @@ export default function Research() {
             display: "flex", gap: 0,
             background: "var(--bg-elevated)", borderRadius: "0.6rem",
             border: "1px solid var(--border)", padding: "3px",
+            flexWrap: "wrap",
           }}>
             {Object.entries(MODE_CONFIG).map(([key, m]) => (
               <button
                 key={key}
                 className={`mode-tab${mode === key ? " active" : ""}`}
-                onClick={() => setMode(key)}
+                onClick={() => handleModeChange(key)}
                 style={{
-                  padding: "0.4rem 1rem", borderRadius: "0.45rem",
+                  padding: "0.4rem 0.9rem", borderRadius: "0.45rem",
                   border: "none",
                   background: mode === key ? "var(--bg)" : "transparent",
                   color: mode === key ? "var(--text)" : "var(--muted)",
@@ -448,6 +544,13 @@ export default function Research() {
                 }}
               >
                 <span>{m.icon}</span> {m.label}
+                {key === "CASE" && mode !== "CASE" && (
+                  <span style={{
+                    fontSize: "0.55rem", background: "rgba(67,56,202,0.12)",
+                    color: "#818cf8", padding: "0.1rem 0.3rem",
+                    borderRadius: "0.3rem", fontWeight: 700,
+                  }}>AI</span>
+                )}
               </button>
             ))}
           </div>
@@ -464,21 +567,41 @@ export default function Research() {
       }}>
         {/* Sidebar */}
         <div className="glass" style={{ padding: "0.7rem", overflow: "hidden", display: "flex", flexDirection: "column", marginBottom: 0 }}>
+          {/* Case selector only in CASE mode */}
+          {mode === "CASE" && (
+            <CaseSelector
+              selectedCaseId={selectedCaseId}
+              onSelect={setSelectedCaseId}
+            />
+          )}
+
           <div style={{
             fontSize: "0.7rem", fontWeight: 700, color: "var(--muted)",
             textTransform: "uppercase", letterSpacing: "0.06em",
             padding: "0 0.3rem", marginBottom: "0.5rem",
           }}>Conversations</div>
-          <ThreadSidebar
-            threads={threads}
-            activeThread={activeThread}
-            onSelect={selectThread}
-            onCreate={handleCreateThread}
-            onRename={handleRename}
-            onDelete={handleDelete}
-            loading={threadsLoading}
-            creating={creating}
-          />
+
+          {mode === "CASE" && !selectedCaseId ? (
+            <div style={{
+              display: "flex", flexDirection: "column", alignItems: "center",
+              justifyContent: "center", flex: 1, color: "var(--muted)",
+              fontSize: "0.8rem", textAlign: "center", padding: "1rem",
+            }}>
+              <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🗂️</div>
+              Select a case above to start a Case AI conversation
+            </div>
+          ) : (
+            <ThreadSidebar
+              threads={threads}
+              activeThread={activeThread}
+              onSelect={selectThread}
+              onCreate={handleCreateThread}
+              onRename={handleRename}
+              onDelete={handleDelete}
+              loading={threadsLoading}
+              creating={creating}
+            />
+          )}
         </div>
 
         {/* Chat */}
@@ -502,17 +625,46 @@ export default function Research() {
                 <div style={{ fontSize: "0.88rem", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {activeThread.title}
                 </div>
+                {mode === "CASE" && selectedCaseId && (
+                  <div style={{ fontSize: "0.7rem", color: "var(--muted)", marginTop: "1px" }}>
+                    Case ID: {selectedCaseId}
+                  </div>
+                )}
               </div>
               <span style={{
                 fontSize: "0.68rem", padding: "0.15rem 0.5rem", borderRadius: "1rem",
                 background: cfg.tagBg, color: "var(--muted)", fontWeight: 600, flexShrink: 0,
               }}>{cfg.label}</span>
+              {mode === "CASE" && (
+                <span className="case-ai-badge">8 tools</span>
+              )}
             </div>
           )}
 
           {/* Messages area */}
           <div style={{ flex: 1, overflowY: "auto", paddingRight: "0.2rem" }}>
-            {!activeThread ? (
+            {mode === "CASE" && !selectedCaseId ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--muted)" }}>
+                <div style={{ fontSize: "2.5rem", marginBottom: "0.75rem" }}>🗂️</div>
+                <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>Select a case to begin</div>
+                <div style={{ fontSize: "0.82rem", textAlign: "center", maxWidth: 260, lineHeight: 1.6 }}>
+                  Case AI uses 8 tools — case info, case documents,
+                  and all 6 law sources — to give you comprehensive research.
+                </div>
+                <div style={{
+                  marginTop: "1.25rem", display: "flex", flexWrap: "wrap",
+                  gap: "0.4rem", justifyContent: "center", maxWidth: 320,
+                }}>
+                  {["fetch_case_info", "search_case_docs", "search_bns", "search_bnss", "search_bsa", "search_constitution", "search_it_act", "search_all_laws"].map((tool) => (
+                    <span key={tool} style={{
+                      fontSize: "0.65rem", padding: "0.15rem 0.45rem",
+                      borderRadius: "1rem", background: "var(--bg-elevated)",
+                      border: "1px solid var(--border)", color: "var(--muted)", fontFamily: "monospace",
+                    }}>{tool}</span>
+                  ))}
+                </div>
+              </div>
+            ) : !activeThread ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--muted)" }}>
                 <div style={{ fontSize: "2.5rem", marginBottom: "0.75rem", opacity: 0.4 }}>💬</div>
                 <div style={{ fontWeight: 600, marginBottom: "0.2rem" }}>Select a conversation</div>
@@ -568,24 +720,16 @@ export default function Research() {
               className="input"
               style={{ marginBottom: 0, flex: 1, resize: "none", minHeight: "2.5rem", maxHeight: "5rem", lineHeight: 1.5 }}
               rows={1}
-              placeholder={
-                !activeThread ? "Select a conversation…"
-                : mode === "BNS" ? "Ask about Bharatiya Nyaya Sanhita…"
-                : mode === "BNSS" ? "Ask about Bharatiya Nagarik Suraksha Sanhita…"
-                : mode === "BSA" ? "Ask about Bharatiya Sakshya Adhiniyam…"
-                : mode === "CNT" ? "Ask about the Constitution of India…"
-                : mode === "IT" ? "Ask about the IT Act…"
-                : "Ask about Indian law, judgments, statutes…"
-              }
+              placeholder={placeholder}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={loading || !activeThread}
+              disabled={chatDisabled}
             />
             <button
               type="button"
               className="btn btn-primary"
-              disabled={loading || !query.trim() || !activeThread}
+              disabled={chatDisabled || !query.trim()}
               onClick={send}
               style={{ alignSelf: "flex-end", height: "2.5rem", minWidth: 90 }}
             >
@@ -599,6 +743,13 @@ export default function Research() {
           <div className="glass" style={{ flex: 1, overflow: "auto", marginBottom: 0 }}>
             <h3 style={{ fontSize: "0.85rem", marginBottom: "0.65rem", fontWeight: 700, display: "flex", alignItems: "center", gap: "0.35rem" }}>
               📎 Citations
+              {citations.length > 0 && (
+                <span style={{
+                  fontSize: "0.65rem", background: "var(--bg-elevated)",
+                  border: "1px solid var(--border)", borderRadius: "1rem",
+                  padding: "0.1rem 0.4rem", fontWeight: 600,
+                }}>{citations.length}</span>
+              )}
             </h3>
             {citations.length ? (
               citations.map((c, i) => (
@@ -621,6 +772,7 @@ export default function Research() {
             )}
           </div>
 
+          {/* Thread info */}
           {activeThread && (
             <div className="glass" style={{ marginBottom: 0, padding: "0.85rem" }}>
               <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.35rem" }}>
@@ -632,6 +784,23 @@ export default function Research() {
               <div style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
                 {messages.length} messages · Persistent memory
               </div>
+              {mode === "CASE" && (
+                <div style={{ marginTop: "0.5rem" }}>
+                  <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.25rem" }}>
+                    Active Tools
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
+                    {["fetch_case_info", "search_case_docs", "search_all_laws", "search_bns", "search_bnss", "search_bsa", "search_constitution", "search_it_act"].map((t) => (
+                      <span key={t} style={{
+                        fontSize: "0.58rem", padding: "0.1rem 0.35rem",
+                        borderRadius: "0.3rem", background: "rgba(67,56,202,0.1)",
+                        color: "#818cf8", fontFamily: "monospace",
+                        border: "1px solid rgba(67,56,202,0.15)",
+                      }}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

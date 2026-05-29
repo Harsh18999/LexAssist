@@ -21,6 +21,7 @@ export default function Cases() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ client_id: "", title: "", court: "", case_number: "", status: "Active" });
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   const debounce = useRef(null);
 
   // Load clients once (for the dropdown)
@@ -49,7 +50,7 @@ export default function Cases() {
     if (submitting) return;
     setSubmitting(true);
     try {
-      await api.createCase(form);
+      const newCase = await api.createCase(form);
       setShowForm(false);
       setForm({ client_id: "", title: "", court: "", case_number: "", status: "Active" });
       load(search, page);
@@ -58,11 +59,30 @@ export default function Cases() {
     }
   }
 
+  async function handleDelete(c, e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(`Delete case "${c.title}"? This will also remove notes and timeline.`)) return;
+    setDeletingId(c.id);
+    try {
+      await api.deleteCase(c.id);
+      load(search, page);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const statusStyle = (s) => STATUS_COLOR[s] || { bg: "var(--accent-dim)", color: "var(--muted)" };
 
   return (
     <>
-      <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
+      <style>{`
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .case-row-actions { opacity: 0; transition: opacity 0.15s; display: flex; gap: 4px; align-items: center; }
+        .case-list-row:hover .case-row-actions { opacity: 1; }
+      `}</style>
 
       <header className="page-head">
         <h2>Cases</h2>
@@ -103,7 +123,7 @@ export default function Cases() {
           </div>
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? <><span className="spinner" /> Creating…</> : "Create Case"}
+              {submitting ? <><span className="spinner" />Creating…</> : "Create Case"}
             </button>
             <button type="button" className="btn btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
           </div>
@@ -125,7 +145,7 @@ export default function Cases() {
           data.cases.map((c) => {
             const ss = statusStyle(c.status);
             return (
-              <Link key={c.id} to={`/cases/${c.id}`} className="list-row" style={{ textDecoration: "none", color: "inherit" }}>
+              <Link key={c.id} to={`/cases/${c.id}`} className="list-row case-list-row" style={{ textDecoration: "none", color: "inherit" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                     <strong style={{ fontSize: "0.9rem" }}>{c.title}</strong>
@@ -133,6 +153,19 @@ export default function Cases() {
                   </div>
                   <div className="meta">{c.client_name} · {c.court || "—"}</div>
                 </div>
+
+                <div className="case-row-actions">
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    title="Delete case"
+                    style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem", color: "#ef4444" }}
+                    disabled={deletingId === c.id}
+                    onClick={(e) => handleDelete(c, e)}
+                  >
+                    {deletingId === c.id ? <span className="spinner" /> : "✕ Delete"}
+                  </button>
+                </div>
+
                 <span style={{
                   fontSize: "0.68rem", fontWeight: 700, padding: "0.2rem 0.6rem",
                   borderRadius: 5, whiteSpace: "nowrap",

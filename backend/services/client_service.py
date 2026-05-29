@@ -116,3 +116,33 @@ def count_clients(user_id: str):
         row = cur.fetchone()
         cur.close()
     return row["n"] if row else 0
+
+
+def delete_client(user_id: str, client_id: str, force: bool = False) -> bool:
+    """
+    Delete a client.
+    If *force* is False and the client has cases, raises ValueError.
+    If *force* is True, all cases belonging to the client are deleted first.
+    Returns True if the client existed and was deleted, False if not found.
+    """
+    client = get_client(user_id, client_id)
+    if not client:
+        return False
+    case_count = count_client_cases(user_id, client_id)
+    if case_count > 0 and not force:
+        raise ValueError(
+            f"Client has {case_count} case(s). Pass force=true to delete them all."
+        )
+    with get_conn() as conn:
+        cur = conn.cursor()
+        if force and case_count > 0:
+            cur.execute(
+                "DELETE FROM cases WHERE client_id = %s AND user_id = %s",
+                (client_id, user_id),
+            )
+        cur.execute(
+            "DELETE FROM clients WHERE id = %s AND user_id = %s",
+            (client_id, user_id),
+        )
+        cur.close()
+    return True

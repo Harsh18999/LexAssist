@@ -153,3 +153,21 @@ def upcoming_hearings(user_id: str, limit=5):
         rows = cur.fetchall()
         cur.close()
     return [row_to_dict(r) for r in rows]
+
+
+def delete_case(user_id: str, case_id: str) -> bool:
+    """
+    Delete a case and its associated notes / timeline events.
+    Returns True if the case existed and was deleted, False if not found.
+    """
+    case = get_case(user_id, case_id)
+    if not case:
+        return False
+    with get_conn() as conn:
+        cur = conn.cursor()
+        # Remove dependent rows first (notes, timeline)
+        cur.execute("DELETE FROM case_notes WHERE case_id = %s AND user_id = %s", (case_id, user_id))
+        cur.execute("DELETE FROM case_timeline WHERE case_id = %s AND user_id = %s", (case_id, user_id))
+        cur.execute("DELETE FROM cases WHERE id = %s AND user_id = %s", (case_id, user_id))
+        cur.close()
+    return True

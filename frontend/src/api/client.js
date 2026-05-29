@@ -33,19 +33,30 @@ async function request(path, options = {}) {
   const rt = res.headers.get("x-response-time");
   if (rt) latency.last = rt;
 
-  if (res.status === 401) {
-    localStorage.removeItem("jurisai_token");
-    localStorage.removeItem("jurisai_user");
-    window.location.href = "/login";
-    throw new Error("Session expired");
-  }
   if (!res.ok) {
+    // Read error body once for all failure cases
     const err = await res.json().catch(() => ({}));
     const detail = err.detail;
     const msg = Array.isArray(detail)
       ? detail.map((d) => d.msg).join(", ")
-      : detail || res.statusText;
-    throw new Error(msg);
+      : typeof detail === "string" && detail
+        ? detail
+        : null;
+
+    if (res.status === 401) {
+      // Auth endpoints (login/register) legitimately return 401 for wrong credentials.
+      // Don't treat them as session expiry — just surface the error message.
+      const isAuthEndpoint = path.startsWith("/auth/");
+      if (!isAuthEndpoint) {
+        localStorage.removeItem("jurisai_token");
+        localStorage.removeItem("jurisai_user");
+        window.location.href = "/login";
+        throw new Error("Session expired");
+      }
+      throw new Error(msg || "Invalid email or password");
+    }
+
+    throw new Error(msg || res.statusText || "Request failed");
   }
   const type = res.headers.get("content-type") || "";
   if (type.includes("application/json")) return res.json();
@@ -196,6 +207,22 @@ export const api = {
     return result;
   },
   getClient: (id) => deduplicatedGet(`client:${id}`, `/clients/${id}`, TTL.clients),
+  updateClient: async (id, data) => {
+    const result = await request(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+    cache.invalidate(`client:${id}`);
+    cache.invalidatePrefix("clients:");
+    cache.invalidate("dashboard");
+    return result;
+  },
+  deleteClient: async (id, force = false) => {
+    const url = force ? `/clients/${id}?force=true` : `/clients/${id}`;
+    const result = await request(url, { method: "DELETE" });
+    cache.invalidate(`client:${id}`);
+    cache.invalidatePrefix("clients:");
+    cache.invalidatePrefix("cases:");
+    cache.invalidate("dashboard");
+    return result;
+  },
 
   // Cases — deduplicated + cached 30s; invalidated on create/update
   cases: (search = "", clientId = "", page = 1, pageSize = 10) => {
@@ -213,6 +240,13 @@ export const api = {
   },
   updateCase: async (id, data) => {
     const result = await request(`/cases/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+    cache.invalidate(`case:${id}`);
+    cache.invalidatePrefix("cases:");
+    cache.invalidate("dashboard");
+    return result;
+  },
+  deleteCase: async (id) => {
+    const result = await request(`/cases/${id}`, { method: "DELETE" });
     cache.invalidate(`case:${id}`);
     cache.invalidatePrefix("cases:");
     cache.invalidate("dashboard");

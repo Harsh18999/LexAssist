@@ -54,7 +54,7 @@ class ChatRequest(BaseModel):
 
 
 # Valid chat modes
-VALID_MODES = {"MAIN", "BNS", "BNSS", "BSA", "CNT", "IT"}
+VALID_MODES = {"MAIN", "BNS", "BNSS", "BSA", "CNT", "IT", "CASE"}
 
 
 class ThreadChatRequest(BaseModel):
@@ -81,6 +81,15 @@ class ClientRequest(BaseModel):
     address: str = ""
     advocate: str = ""
     jurisdiction: str = ""
+
+
+class ClientUpdateRequest(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    address: str | None = None
+    advocate: str | None = None
+    jurisdiction: str | None = None
 
 
 class CaseRequest(BaseModel):
@@ -175,6 +184,36 @@ def get_client(client_id: str, user=Depends(get_current_user)):
     return c
 
 
+@router.patch("/clients/{client_id}")
+def update_client(client_id: str, req: ClientUpdateRequest, user=Depends(get_current_user)):
+    """Partial update for a client record."""
+    data = {k: v for k, v in req.model_dump().items() if v is not None}
+    if not data:
+        raise HTTPException(400, "No fields provided to update")
+    c = client_service.update_client(user["id"], client_id, data)
+    if not c:
+        raise HTTPException(404, "Client not found")
+    activity_service.log_activity(user["id"], "Client Updated", c["name"])
+    return c
+
+
+@router.delete("/clients/{client_id}")
+def delete_client(
+    client_id: str,
+    force: bool = Query(False, description="Cascade-delete all related cases"),
+    user=Depends(get_current_user),
+):
+    """Delete a client. Use force=true to also delete all their cases."""
+    try:
+        deleted = client_service.delete_client(user["id"], client_id, force=force)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not deleted:
+        raise HTTPException(404, "Client not found")
+    activity_service.log_activity(user["id"], "Client Deleted", client_id)
+    return {"ok": True, "deleted": client_id}
+
+
 # ---------------------------------------------------------------------------
 # Cases
 # ---------------------------------------------------------------------------
@@ -219,7 +258,18 @@ def update_case(case_id: str, req: CaseRequest, user=Depends(get_current_user)):
     case = case_service.update_case(user["id"], case_id, data)
     if not case:
         raise HTTPException(404, "Case not found")
+    activity_service.log_activity(user["id"], "Case Updated", case["title"])
     return case
+
+
+@router.delete("/cases/{case_id}")
+def delete_case(case_id: str, user=Depends(get_current_user)):
+    """Delete a case and its notes/timeline."""
+    deleted = case_service.delete_case(user["id"], case_id)
+    if not deleted:
+        raise HTTPException(404, "Case not found")
+    activity_service.log_activity(user["id"], "Case Deleted", case_id)
+    return {"ok": True, "deleted": case_id}
 
 
 # ---------------------------------------------------------------------------
