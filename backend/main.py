@@ -22,7 +22,7 @@ app = FastAPI(
 )
 
 # ── Middleware (order matters: first added = outermost) ──────────────────────
-app.add_middleware(LatencyMiddleware)          # stamp X-Response-Time on every call
+# app.add_middleware(LatencyMiddleware)          # stamp X-Response-Time on every call
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

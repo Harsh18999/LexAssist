@@ -158,7 +158,11 @@ def dashboard_stream(user=Depends(get_current_user)):
     return StreamingResponse(
         _gen(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -385,8 +389,8 @@ def document_status_stream(doc_id: str, user=Depends(get_current_user)):
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         },
     )
 
@@ -418,8 +422,8 @@ async def document_chat_stream(doc_id: str, req: ChatDocRequest, user=Depends(ge
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         },
     )
 
@@ -586,8 +590,8 @@ async def chat_stream(req: ThreadChatRequest, user=Depends(get_current_user)):
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         },
     )
 
@@ -616,7 +620,11 @@ def chat(
     return StreamingResponse(
         chat_service.stream_query(user["id"], req.query.strip(), case_id),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
