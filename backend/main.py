@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,12 +37,19 @@ app.include_router(router, prefix="/api")
 
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     from backend.db.database import init_db
     init_db()
+    # Initialise DOCUMENT_VECTOR_DB table (case-uploaded document embeddings)
+    try:
+        from rag.vector_store import ainit_doc_table
+        await ainit_doc_table()
+    except Exception as exc:
+        print(f"[startup] DOCUMENT_VECTOR_DB init warning: {exc}")
 
 
 @app.get("/")
 def health():
     return {"status": "ok", "service": "JurisAI", "version": "2.0"}
+
 

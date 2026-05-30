@@ -91,6 +91,15 @@ def init_db():
             ALTER TABLE documents ADD COLUMN IF NOT EXISTS s3_key TEXT
         """)
 
+        # Migration: add processing status column to documents
+        cur.execute("""
+            ALTER TABLE documents ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completed'
+        """)
+        # Migration: add processing_error column for error messages
+        cur.execute("""
+            ALTER TABLE documents ADD COLUMN IF NOT EXISTS processing_error TEXT
+        """)
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS notes (
                 id TEXT PRIMARY KEY,

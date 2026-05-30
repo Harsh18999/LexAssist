@@ -56,7 +56,6 @@ export default function Clients() {
   }
 
   function openEdit(c, e) {
-    e.preventDefault();
     e.stopPropagation();
     setEditClient(c);
     setEditForm({
@@ -85,7 +84,6 @@ export default function Clients() {
   }
 
   async function handleDelete(c, e) {
-    e.preventDefault();
     e.stopPropagation();
     const confirmed = confirm(
       c.case_count > 0
@@ -108,6 +106,8 @@ export default function Clients() {
     <>
       <style>{`
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .client-list-row { display: flex; align-items: center; gap: 0.5rem; }
+        .client-list-row-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: inherit; }
         .client-row-actions { opacity: 0; transition: opacity 0.15s; display: flex; gap: 4px; }
         .client-list-row:hover .client-row-actions { opacity: 1; }
         .modal-overlay {
@@ -176,8 +176,8 @@ export default function Clients() {
           <EmptyState icon="👥" title="No clients yet" subtitle="Create your first client to get started" />
         ) : (
           data.clients.map((c) => (
-            <Link key={c.id} to={`/clients/${c.id}`} className="list-row client-list-row" style={{ textDecoration: "none", color: "inherit" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0 }}>
+            <div key={c.id} className="list-row client-list-row">
+              <Link to={`/clients/${c.id}`} className="client-list-row-link">
                 <div style={{
                   width: 34, height: 34, borderRadius: "50%",
                   background: "var(--bg-elevated)", border: "1px solid var(--border)",
@@ -190,7 +190,8 @@ export default function Clients() {
                   <strong style={{ fontSize: "0.9rem" }}>{c.name}</strong>
                   <div className="meta">{c.jurisdiction || "—"} · {c.case_count ?? 0} case{c.case_count !== 1 ? "s" : ""}</div>
                 </div>
-              </div>
+                <span className="badge" style={{ marginLeft: "auto" }}>View →</span>
+              </Link>
 
               <div className="client-row-actions">
                 <button
@@ -211,9 +212,7 @@ export default function Clients() {
                   {deletingId === c.id ? <span className="spinner" /> : "✕ Delete"}
                 </button>
               </div>
-
-              <span className="badge" style={{ marginLeft: "0.5rem" }}>View →</span>
-            </Link>
+            </div>
           ))
         )}
 

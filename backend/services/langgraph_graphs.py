@@ -134,7 +134,14 @@ def _make_main_graph():
     """
 
     async def retrieve_node(state: ChatState) -> dict:
-        retriever = await get_retriever({"k": 6})
+        case_id = state.get("case_id")
+        if case_id:
+            # Case-scoped: query DOCUMENT_VECTOR_DB filtered by case_id
+            from rag.query_engine import get_doc_retriever
+            retriever = await get_doc_retriever({"k": 6, "filter": {"case_id": case_id}})
+        else:
+            # Global: query LEGAL_VECTOR_DB (statute law corpus)
+            retriever = await get_retriever({"k": 6})
         docs = await retriever.ainvoke(state["query"])
         return {
             "context_docs": _extract_citations(docs),
@@ -158,9 +165,18 @@ def _make_main_graph():
         msgs = [SystemMessage(content=system)] + history
 
         response = await llm.ainvoke(msgs)
-        ai_msg = AIMessage(content=response.content)
+        # Bedrock Converse API may return content as a list of blocks
+        raw_content = response.content
+        if isinstance(raw_content, list):
+            answer_text = "".join(
+                b.get("text", "") if isinstance(b, dict) else str(b)
+                for b in raw_content
+            )
+        else:
+            answer_text = raw_content or ""
+        ai_msg = AIMessage(content=answer_text)
         return {
-            "final_answer": response.content,
+            "final_answer": answer_text,
             "citations": state.get("context_docs", []),
             "messages": [ai_msg],
         }
@@ -209,9 +225,18 @@ def _make_source_filtered_graph(mode: str):
         msgs = [SystemMessage(content=system)] + history
 
         response = await llm.ainvoke(msgs)
-        ai_msg = AIMessage(content=response.content)
+        # Bedrock Converse API may return content as a list of blocks
+        raw_content = response.content
+        if isinstance(raw_content, list):
+            answer_text = "".join(
+                b.get("text", "") if isinstance(b, dict) else str(b)
+                for b in raw_content
+            )
+        else:
+            answer_text = raw_content or ""
+        ai_msg = AIMessage(content=answer_text)
         return {
-            "final_answer": response.content,
+            "final_answer": answer_text,
             "citations": state.get("context_docs", []),
             "messages": [ai_msg],
         }
@@ -293,7 +318,8 @@ def _make_case_tools(case_id: str, user_id: str | None = None):
         (charge sheets, petitions, judgments, evidence, etc.).
         """
         try:
-            retriever = await get_retriever({
+            from rag.query_engine import get_doc_retriever
+            retriever = await get_doc_retriever({
                 "k": 6,
                 "filter": {"case_id": case_id},
             })
@@ -619,6 +645,12 @@ async def run_graph_streaming(
                                     })
 
         # --- Phase 2: Drip-feed the final answer as simulated token stream ---
+        # Normalise to string in case any node stored a list (Bedrock content blocks)
+        if isinstance(final_answer, list):
+            final_answer = "".join(
+                b.get("text", "") if isinstance(b, dict) else str(b)
+                for b in final_answer
+            )
         if final_answer:
             yield {"type": "status", "content": "Writing response…"}
             # Split into small word-groups for a natural typing feel

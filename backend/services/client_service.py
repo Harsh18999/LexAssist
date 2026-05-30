@@ -136,6 +136,19 @@ def delete_client(user_id: str, client_id: str, force: bool = False) -> bool:
     with get_conn() as conn:
         cur = conn.cursor()
         if force and case_count > 0:
+            # Must delete dependent rows before cases (FK constraints)
+            cur.execute(
+                """DELETE FROM notes WHERE case_id IN (
+                    SELECT id FROM cases WHERE client_id = %s AND user_id = %s
+                )""",
+                (client_id, user_id),
+            )
+            cur.execute(
+                """DELETE FROM hearings WHERE case_id IN (
+                    SELECT id FROM cases WHERE client_id = %s AND user_id = %s
+                )""",
+                (client_id, user_id),
+            )
             cur.execute(
                 "DELETE FROM cases WHERE client_id = %s AND user_id = %s",
                 (client_id, user_id),

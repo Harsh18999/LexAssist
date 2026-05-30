@@ -50,6 +50,19 @@ export default function Documents() {
     }
   }
 
+  async function handleView(id) {
+    if (actionLock) return;
+    setActionLock(true);
+    try {
+      const res = await api.downloadDocument(id);
+      window.open(res.url, "_blank");
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setActionLock(false);
+    }
+  }
+
   async function handleDownload(id) {
     if (actionLock) return;
     setActionLock(true);
@@ -142,10 +155,14 @@ export default function Documents() {
                       <>
                         <span>·</span>
                         <Link to={`/cases/${doc.case_id}`} style={{ color: "var(--accent)", fontSize: "0.73rem" }} onClick={(e) => e.stopPropagation()}>
-                          Case
+                          View Case
                         </Link>
                       </>
                     )}
+                    {/* Processing status badge */}
+                    {doc.status === "pending"    && <span style={{ fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: "1rem", background: "rgba(234,179,8,0.12)", color: "#ca8a04", fontWeight: 700 }}>⏳ Pending</span>}
+                    {doc.status === "processing" && <span style={{ fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: "1rem", background: "rgba(37,99,235,0.1)", color: "var(--accent)", fontWeight: 700 }}>⚡ Indexing</span>}
+                    {doc.status === "error"      && <span style={{ fontSize: "0.65rem", padding: "0.1rem 0.4rem", borderRadius: "1rem", background: "rgba(239,68,68,0.1)", color: "#dc2626", fontWeight: 700 }}>⚠ Error</span>}
                     {doc.doc_type && <span className="badge" style={{ verticalAlign: "middle" }}>{doc.doc_type}</span>}
                   </div>
                 </div>
@@ -154,16 +171,30 @@ export default function Documents() {
               <div style={{ display: "flex", gap: "0.4rem", flexShrink: 0 }}>
                 <button
                   className="btn btn-ghost btn-sm"
+                  onClick={() => handleView(doc.id)}
+                  disabled={actionLock}
+                  title="View PDF"
+                >👁 View</button>
+                <button
+                  className="btn btn-ghost btn-sm"
                   onClick={() => handleDownload(doc.id)}
                   disabled={actionLock}
                   title="Download"
                 >⬇ Download</button>
+                {doc.case_id && doc.status === "completed" && (
+                  <Link
+                    to={`/documents/${doc.id}/ai`}
+                    className="btn btn-ghost btn-sm"
+                    style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                    title="Ask AI about this document"
+                  >🤖 Ask AI</Link>
+                )}
                 <button
                   className="btn btn-ghost btn-sm"
                   style={{ color: "var(--danger)" }}
                   disabled={deleting === doc.id || actionLock}
                   onClick={() => handleDelete(doc.id)}
-                  title="Delete from S3"
+                  title="Delete from S3 and database"
                 >
                   {deleting === doc.id ? <span className="spinner" /> : "✕"}
                 </button>

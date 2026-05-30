@@ -5,18 +5,18 @@ const BASE_URL = ""; // same origin
 
 const TTL = {
   dashboard: 60_000,   // 60s
-  clients:   30_000,   // 30s
-  cases:     30_000,   // 30s
+  clients: 30_000,   // 30s
+  cases: 30_000,   // 30s
   documents: 30_000,   // 30s
-  me:        120_000,  // 2min
-  threads:   20_000,   // 20s
+  me: 120_000,  // 2min
+  threads: 20_000,   // 20s
 };
 
 /** Tracks last observed X-Response-Time from the server */
 export const latency = { last: null };
 
 function getToken() {
-  return localStorage.getItem("jurisai_token");
+  return localStorage.getItem("lexassist_token");
 }
 
 async function request(path, options = {}) {
@@ -48,8 +48,8 @@ async function request(path, options = {}) {
       // Don't treat them as session expiry — just surface the error message.
       const isAuthEndpoint = path.startsWith("/auth/");
       if (!isAuthEndpoint) {
-        localStorage.removeItem("jurisai_token");
-        localStorage.removeItem("jurisai_user");
+        localStorage.removeItem("lexassist_token");
+        localStorage.removeItem("lexassist_user");
         window.location.href = "/login";
         throw new Error("Session expired");
       }
@@ -117,7 +117,7 @@ export function uploadWithProgress(path, file, onProgress) {
 
     xhr.onload = () => {
       if (xhr.status === 401) {
-        localStorage.removeItem("jurisai_token");
+        localStorage.removeItem("lexassist_token");
         window.location.href = "/login";
         return reject(new Error("Session expired"));
       }
@@ -172,6 +172,17 @@ export const api = {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
+
+      function processLine(line) {
+        if (line.startsWith("data: ")) {
+          try {
+            const d = JSON.parse(line.slice(6));
+            cache.set("dashboard", d, TTL.dashboard);
+            onData(d);
+          } catch { }
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -179,13 +190,15 @@ export const api = {
         const lines = buf.split("\n");
         buf = lines.pop();
         for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const d = JSON.parse(line.slice(6));
-              cache.set("dashboard", d, TTL.dashboard);
-              onData(d);
-            } catch {}
-          }
+          processLine(line);
+        }
+      }
+      // Flush remaining buffer
+      buf += decoder.decode();
+      if (buf.trim()) {
+        const remaining = buf.split("\n");
+        for (const line of remaining) {
+          processLine(line);
         }
       }
     }).catch((err) => {
@@ -259,6 +272,7 @@ export const api = {
     const url = `/documents?search=${encodeURIComponent(search)}&page=${page}&page_size=${pageSize}`;
     return deduplicatedGet(key, url, TTL.documents);
   },
+  getDocument: (id) => request(`/documents/${id}`),
   deleteDocument: async (id) => {
     const result = await request(`/documents/${id}`, { method: "DELETE" });
     cache.invalidatePrefix("documents");
@@ -268,7 +282,7 @@ export const api = {
   downloadDocument: (id) => request(`/documents/${id}/download`),
 
   // Case documents
-  uploadCaseDoc: async (caseId, file, onProgress = () => {}) => {
+  uploadCaseDoc: async (caseId, file, onProgress = () => { }) => {
     const result = await uploadWithProgress(`/cases/${caseId}/documents`, file, onProgress);
     cache.invalidate(`case:${caseId}`);
     cache.invalidatePrefix("documents");
@@ -277,11 +291,105 @@ export const api = {
   },
 
   // Standalone upload
-  upload: async (file, onProgress = () => {}) => {
+  upload: async (file, onProgress = () => { }) => {
     const result = await uploadWithProgress("/upload", file, onProgress);
     cache.invalidatePrefix("documents");
     cache.invalidate("dashboard");
     return result;
+  },
+
+  // List documents for a specific case
+  caseDocuments: (caseId) => request(`/cases/${caseId}/documents`),
+
+  /**
+   * Stream document processing status via SSE.
+   * Calls onUpdate({status, error}) on each event.
+   * Calls onDone() when status is completed/error.
+   * Returns AbortController.
+   */
+  documentStatus: (docId, onUpdate, onDone) => {
+    const token = getToken();
+    const ctrl = new AbortController();
+    fetch(`${API}/documents/${docId}/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
+    }).then(async (res) => {
+      if (!res.ok) { onDone && onDone(); return; }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const evt = JSON.parse(line.slice(6));
+              onUpdate && onUpdate(evt);
+              if (evt.status === "completed" || evt.status === "error") {
+                onDone && onDone(evt);
+                return;
+              }
+            } catch { }
+          }
+        }
+      }
+      onDone && onDone();
+    }).catch((err) => {
+      if (err.name !== "AbortError") onDone && onDone({ status: "error", error: err.message });
+    });
+    return ctrl;
+  },
+
+  /**
+   * Stream Document AI chat (answers from a single document).
+   */
+  documentChat: (docId, query, history, onChunk, onDone, onError, onStatus) => {
+    const token = getToken();
+    const ctrl = new AbortController();
+
+    function processSSELine(line) {
+      if (!line.startsWith("data: ")) return;
+      try {
+        const evt = JSON.parse(line.slice(6));
+        if (evt.type === "chunk") onChunk && onChunk(evt.content);
+        else if (evt.type === "status") onStatus && onStatus(evt.content);
+        else if (evt.type === "done") onDone && onDone(evt);
+        else if (evt.type === "error") onError && onError(new Error(evt.content));
+      } catch { }
+    }
+
+    fetch(`${API}/documents/${docId}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ query, history }),
+      signal: ctrl.signal,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        onError && onError(new Error(err.detail || res.statusText));
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) processSSELine(line);
+      }
+      buf += decoder.decode();
+      if (buf.trim()) buf.split("\n").forEach(processSSELine);
+    }).catch((err) => {
+      if (err.name !== "AbortError") onError && onError(err);
+    });
+    return ctrl;
   },
 
   // Notes & timeline
@@ -369,6 +477,18 @@ export const api = {
   streamChatV2: (threadId, mode, query, caseId, onChunk, onDone, onError, onStatus) => {
     const token = getToken();
     const ctrl = new AbortController();
+
+    function processSSELine(line) {
+      if (!line.startsWith("data: ")) return;
+      try {
+        const evt = JSON.parse(line.slice(6));
+        if (evt.type === "chunk") onChunk && onChunk(evt.content);
+        else if (evt.type === "status") onStatus && onStatus(evt.content);
+        else if (evt.type === "done") onDone && onDone(evt);
+        else if (evt.type === "error") onError && onError(new Error(evt.content));
+      } catch { }
+    }
+
     fetch(`${API}/chat/stream`, {
       method: "POST",
       headers: {
@@ -398,14 +518,15 @@ export const api = {
         const lines = buf.split("\n");
         buf = lines.pop();
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === "chunk") onChunk && onChunk(evt.content);
-            else if (evt.type === "status") onStatus && onStatus(evt.content);
-            else if (evt.type === "done") onDone && onDone(evt);
-            else if (evt.type === "error") onError && onError(new Error(evt.content));
-          } catch {}
+          processSSELine(line);
+        }
+      }
+      // Flush any remaining data in the buffer after stream ends
+      buf += decoder.decode(); // flush decoder
+      if (buf.trim()) {
+        const remaining = buf.split("\n");
+        for (const line of remaining) {
+          processSSELine(line);
         }
       }
     }).catch((err) => {
@@ -422,6 +543,17 @@ export const api = {
     const ctrl = new AbortController();
     let url = `${API}/chat`;
     if (caseId) url += `?case_id=${caseId}`;
+
+    function processSSELine(line) {
+      if (!line.startsWith("data: ")) return;
+      try {
+        const evt = JSON.parse(line.slice(6));
+        if (evt.type === "chunk") onChunk && onChunk(evt.content);
+        else if (evt.type === "done") onDone && onDone(evt);
+        else if (evt.type === "error") onError && onError(new Error(evt.content));
+      } catch { }
+    }
+
     fetch(url, {
       method: "POST",
       headers: {
@@ -446,13 +578,15 @@ export const api = {
         const lines = buf.split("\n");
         buf = lines.pop();
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === "chunk") onChunk && onChunk(evt.content);
-            else if (evt.type === "done") onDone && onDone(evt);
-            else if (evt.type === "error") onError && onError(new Error(evt.content));
-          } catch {}
+          processSSELine(line);
+        }
+      }
+      // Flush remaining buffer
+      buf += decoder.decode();
+      if (buf.trim()) {
+        const remaining = buf.split("\n");
+        for (const line of remaining) {
+          processSSELine(line);
         }
       }
     }).catch((err) => {

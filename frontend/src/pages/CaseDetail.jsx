@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, formatBytes, formatTime } from "../api/client";
-import CaseChatPanel from "../components/CaseChatPanel";
+import { RowSkeleton, Skeleton } from "../components/ui";
 
 const CASE_FIELDS = [
   ["case_number", "Case Number"],
@@ -28,7 +28,11 @@ export default function CaseDetail() {
   const [tab, setTab] = useState("overview");
   const [note, setNote] = useState("");
   const [uploadState, setUploadState] = useState({ progress: 0, uploading: false, error: null });
+  const [docStatuses, setDocStatuses] = useState({}); // docId -> { status, error }
+  const [deletingDocId, setDeletingDocId] = useState(null);
+  const [dragging, setDragging] = useState(false);
   const inputRef = useRef(null);
+  const statusCtrlsRef = useRef({});
 
   // Edit state
   const [showEdit, setShowEdit] = useState(false);
@@ -60,10 +64,15 @@ export default function CaseDetail() {
   }, [id]);
 
   async function uploadDoc(file) {
-    if (!file) return;
+    if (!file || uploadState.uploading) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setUploadState({ progress: 0, uploading: false, error: "Only PDF files are allowed." });
+      return;
+    }
     setUploadState({ progress: 0, uploading: true, error: null });
+    let newDoc;
     try {
-      const newDoc = await api.uploadCaseDoc(id, file, (pct) =>
+      newDoc = await api.uploadCaseDoc(id, file, (pct) =>
         setUploadState((s) => ({ ...s, progress: pct }))
       );
       setUploadState({ progress: 100, uploading: false, error: null });
@@ -71,6 +80,14 @@ export default function CaseDetail() {
         ...prev,
         documents: [newDoc, ...(prev.documents || [])],
       }));
+      // Start polling processing status for this doc
+      setDocStatuses((prev) => ({ ...prev, [newDoc.id]: { status: "pending" } }));
+      const ctrl = api.documentStatus(
+        newDoc.id,
+        (evt) => setDocStatuses((prev) => ({ ...prev, [newDoc.id]: { status: evt.status, error: evt.error } })),
+        (evt) => setDocStatuses((prev) => ({ ...prev, [newDoc.id]: { status: evt?.status || "completed", error: evt?.error } }))
+      );
+      statusCtrlsRef.current[newDoc.id] = ctrl;
     } catch (err) {
       setUploadState({ progress: 0, uploading: false, error: err.message });
     }
@@ -88,6 +105,15 @@ export default function CaseDetail() {
     }));
   }
 
+  async function handleView(docId) {
+    try {
+      const res = await api.downloadDocument(docId);
+      window.open(res.url, "_blank");
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+
   async function handleDownload(docId) {
     try {
       const res = await api.downloadDocument(docId);
@@ -98,15 +124,21 @@ export default function CaseDetail() {
   }
 
   async function handleDelete(docId) {
-    if (!confirm("Delete this document from S3?")) return;
+    if (!confirm("Delete this document from S3 and database?")) return;
+    setDeletingDocId(docId);
     try {
       await api.deleteDocument(docId);
       setCaseData((prev) => ({
         ...prev,
         documents: (prev.documents || []).filter((d) => d.id !== docId),
       }));
+      setDocStatuses((prev) => { const n = { ...prev }; delete n[docId]; return n; });
+      statusCtrlsRef.current[docId]?.abort();
+      delete statusCtrlsRef.current[docId];
     } catch (e) {
       alert(e.message);
+    } finally {
+      setDeletingDocId(null);
     }
   }
 
@@ -137,7 +169,36 @@ export default function CaseDetail() {
     }
   }
 
-  if (!caseData) return <div className="empty">Loading case…</div>;
+  // Drag-drop handlers
+  const onDragOver  = useCallback((e) => { e.preventDefault(); setDragging(true); }, []);
+  const onDragLeave = useCallback(() => setDragging(false), []);
+  const onDrop      = useCallback((e) => {
+    e.preventDefault(); setDragging(false);
+    const f = Array.from(e.dataTransfer.files).find((f) => f.name.toLowerCase().endsWith(".pdf"));
+    if (f) uploadDoc(f);
+  }, [id, uploadState.uploading]);
+
+  if (!caseData) return (
+    <>
+      <header className="page-head">
+        <Skeleton width={80} height="0.75rem" style={{ marginBottom: "0.5rem" }} />
+        <Skeleton width={240} height="1.4rem" style={{ marginBottom: "0.3rem" }} />
+        <Skeleton width={160} height="0.8rem" />
+      </header>
+      <div className="case-layout">
+        <div>
+          <div className="glass" style={{ marginBottom: "1rem" }}>
+            <RowSkeleton rows={6} cols={2} height="0.85rem" />
+          </div>
+          <div className="glass"><RowSkeleton rows={3} cols={2} /></div>
+        </div>
+        <div className="glass" style={{ minHeight: 400 }}>
+          <Skeleton height="2.5rem" style={{ marginBottom: "0.75rem" }} />
+          <RowSkeleton rows={5} cols={1} height="3rem" />
+        </div>
+      </div>
+    </>
+  );
 
   const info = [
     ["Case Number", caseData.case_number],
@@ -259,8 +320,12 @@ export default function CaseDetail() {
           {tab === "documents" && (
             <div className="glass">
               <div
-                className="case-upload-zone"
-                onClick={() => inputRef.current?.click()}
+                className={`case-upload-zone${dragging ? " dragging" : ""}${uploadState.uploading ? " disabled" : ""}`}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+                onClick={() => !uploadState.uploading && inputRef.current?.click()}
+                style={{ pointerEvents: uploadState.uploading ? "none" : "auto" }}
               >
                 <input
                   ref={inputRef}
@@ -269,9 +334,9 @@ export default function CaseDetail() {
                   style={{ display: "none" }}
                   onChange={(e) => uploadDoc(e.target.files?.[0])}
                 />
-                <span style={{ fontSize: "1.5rem" }}>📎</span>
+                <span style={{ fontSize: "1.5rem" }}>📄</span>
                 <span style={{ fontSize: "0.88rem", color: "var(--muted)" }}>
-                  Click to upload a PDF document
+                  {uploadState.uploading ? "Uploading…" : dragging ? "Drop PDF here" : "Click or drag & drop a PDF"}
                 </span>
               </div>
 
@@ -293,22 +358,38 @@ export default function CaseDetail() {
               {(caseData.documents || []).length === 0 ? (
                 <p className="meta" style={{ marginTop: "1rem" }}>No documents uploaded yet.</p>
               ) : (
-                <div style={{ marginTop: "1rem" }}>
-                  {(caseData.documents || []).map((d) => (
-                    <div key={d.id} className="list-row">
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-                        <span style={{ fontSize: "1.2rem" }}>📄</span>
-                        <div>
-                          <div style={{ fontWeight: 500, fontSize: "0.88rem" }}>{d.filename}</div>
-                          <div className="meta">{formatBytes(d.size_bytes)} · {formatTime(d.created_at)}</div>
+                <div style={{ marginTop: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {(caseData.documents || []).map((d) => {
+                    const ds = docStatuses[d.id] || { status: d.status || "completed" };
+                    const isDel = deletingDocId === d.id;
+                    return (
+                      <div key={d.id} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: "0.4rem" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                          <span style={{ fontSize: "1.1rem" }}>📄</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 500, fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.filename}</div>
+                            <div className="meta">{formatBytes(d.size_bytes)} · {formatTime(d.created_at)}</div>
+                          </div>
+                          {/* Processing status pill */}
+                          {ds.status === "pending"    && <span style={{ fontSize: "0.68rem", padding: "0.15rem 0.5rem", borderRadius: "1rem", background: "rgba(234,179,8,0.12)", color: "#ca8a04", fontWeight: 700, flexShrink: 0 }}>⏳ Pending</span>}
+                          {ds.status === "processing" && <span style={{ fontSize: "0.68rem", padding: "0.15rem 0.5rem", borderRadius: "1rem", background: "rgba(37,99,235,0.1)", color: "var(--accent)", fontWeight: 700, flexShrink: 0, display: "flex", alignItems: "center", gap: "0.3rem" }}><span className="spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />Indexing</span>}
+                          {ds.status === "completed"  && <span style={{ fontSize: "0.68rem", padding: "0.15rem 0.5rem", borderRadius: "1rem", background: "rgba(22,163,74,0.1)", color: "#16a34a", fontWeight: 700, flexShrink: 0 }}>✓ Ready</span>}
+                          {ds.status === "error"      && <span title={ds.error} style={{ fontSize: "0.68rem", padding: "0.15rem 0.5rem", borderRadius: "1rem", background: "rgba(239,68,68,0.1)", color: "#dc2626", fontWeight: 700, flexShrink: 0 }}>⚠ Error</span>}
+
+                          <div style={{ display: "flex", gap: "0.3rem", flexShrink: 0 }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => handleView(d.id)} title="View PDF" disabled={isDel}>👁</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => handleDownload(d.id)} title="Download" disabled={isDel}>⬇</button>
+                            {ds.status === "completed" && (
+                              <Link to={`/documents/${d.id}/ai`} className="btn btn-ghost btn-sm" title="Ask AI about this doc" style={{ display: "inline-flex", alignItems: "center" }}>🤖</Link>
+                            )}
+                            <button className="btn btn-ghost btn-sm" style={{ color: "#dc2626" }} onClick={() => handleDelete(d.id)} disabled={isDel} title="Delete">
+                              {isDel ? <span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} /> : "✕"}
+                            </button>
+                          </div>
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: "0.4rem" }}>
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleDownload(d.id)} title="Download">⬇</button>
-                        <button className="btn btn-ghost btn-sm" style={{ color: "#dc2626" }} onClick={() => handleDelete(d.id)} title="Delete">✕</button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -355,7 +436,20 @@ export default function CaseDetail() {
           )}
         </div>
 
-        <CaseChatPanel caseId={id} caseTitle={caseData.title} />
+        {/* Research CTA */}
+        <div className="glass" style={{ marginTop: "0.85rem", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0.75rem 1rem" }}>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.15rem" }}>🤖 AI Research for this case</div>
+            <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>Use the Research AI to query case documents + all legal sources</div>
+          </div>
+          <Link
+            to="/research"
+            className="btn btn-primary btn-sm"
+            style={{ whiteSpace: "nowrap" }}
+          >
+            Open Research AI
+          </Link>
+        </div>
       </div>
 
       {/* Edit Case Modal */}

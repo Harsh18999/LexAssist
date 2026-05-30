@@ -199,7 +199,8 @@ async def stream_thread_query(
             query=query,
             case_id=case_id,
             case_context=case_context,
-        ):
+        ):  
+            print("Event: ", event)
             if event["type"] == "chunk":
                 final_answer += event["content"]
                 yield f"data: {json.dumps({'type': 'chunk', 'content': event['content']})}\n\n"

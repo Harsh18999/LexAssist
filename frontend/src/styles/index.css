@@ -275,7 +275,7 @@ h1, h2, h3 {
 /* ── Case Layout ── */
 .case-layout {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: 1fr;
   gap: 1rem;
   align-items: start;
 }
@@ -528,3 +528,32 @@ h1, h2, h3 {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted-light); }
+
+/* ── Research / Document AI ── */
+@keyframes popupIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Thread sidebar item */
+.thread-item { transition: background 0.12s ease; }
+.thread-item:hover { background: var(--accent-dim) !important; }
+.thread-item:hover .thread-actions { opacity: 1 !important; }
+
+/* Case picker row */
+.case-pick-row { transition: background 0.1s ease; }
+.case-pick-row:hover { background: var(--accent-dim); }
+
+/* Tool badge */
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.62rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 1rem;
+  font-weight: 700;
+  font-family: monospace;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}

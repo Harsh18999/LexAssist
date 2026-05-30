@@ -27,7 +27,7 @@ export default function Login() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={handleSubmit}>
-        <h1>Sign in to JurisAI</h1>
+        <h1>Sign in to LexAssist</h1>
         <p>Indian legal intelligence for advocates and firms</p>
         <label className="label">Email</label>
         <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />

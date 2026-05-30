@@ -50,7 +50,7 @@ export default function Layout({ children }) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <h1><span>⚖</span> JurisAI</h1>
+          <h1><span>⚖</span> LexAssist</h1>
           <p>Legal Intelligence Platform</p>
         </div>
 

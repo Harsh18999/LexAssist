@@ -48,14 +48,14 @@ def save_case_document(user_id: str, case_id: str, filename: str, content: bytes
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO documents
-               (id, user_id, client_id, case_id, filename, file_path, s3_key, size_bytes, created_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (doc_id, user_id, client_id, case_id, filename, s3_key, s3_key, len(content), _now()),
+               (id, user_id, client_id, case_id, filename, file_path, s3_key, size_bytes, status, created_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (doc_id, user_id, client_id, case_id, filename, s3_key, s3_key, len(content), "pending", _now()),
         )
         cur.close()
 
-    # Index in vector store
-    case_index_service.index_case_document(user_id, case_id, s3_key, filename)
+    # Index in DOCUMENT_VECTOR_DB (background thread — non-blocking)
+    case_index_service.index_case_document(user_id, case_id, doc_id, s3_key, filename)
     return get_document(user_id, doc_id)
 
 
@@ -75,9 +75,9 @@ def save_document(user_id: str, filename: str, content: bytes):
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO documents
-               (id, user_id, filename, file_path, s3_key, doc_type, size_bytes, created_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-            (doc_id, user_id, filename, s3_key, s3_key, "upload", len(content), _now()),
+               (id, user_id, filename, file_path, s3_key, doc_type, size_bytes, status, created_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (doc_id, user_id, filename, s3_key, s3_key, "upload", len(content), "completed", _now()),
         )
         cur.close()
 

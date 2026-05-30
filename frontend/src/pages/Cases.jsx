@@ -60,7 +60,6 @@ export default function Cases() {
   }
 
   async function handleDelete(c, e) {
-    e.preventDefault();
     e.stopPropagation();
     if (!confirm(`Delete case "${c.title}"? This will also remove notes and timeline.`)) return;
     setDeletingId(c.id);
@@ -80,6 +79,8 @@ export default function Cases() {
     <>
       <style>{`
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .case-list-row { display: flex; align-items: center; gap: 0.5rem; }
+        .case-list-row-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.5rem; text-decoration: none; color: inherit; }
         .case-row-actions { opacity: 0; transition: opacity 0.15s; display: flex; gap: 4px; align-items: center; }
         .case-list-row:hover .case-row-actions { opacity: 1; }
       `}</style>
@@ -145,14 +146,21 @@ export default function Cases() {
           data.cases.map((c) => {
             const ss = statusStyle(c.status);
             return (
-              <Link key={c.id} to={`/cases/${c.id}`} className="list-row case-list-row" style={{ textDecoration: "none", color: "inherit" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <strong style={{ fontSize: "0.9rem" }}>{c.title}</strong>
-                    {c.case_number && <span style={{ fontSize: "0.7rem", color: "var(--muted)", fontFamily: "monospace" }}>#{c.case_number}</span>}
+              <div key={c.id} className="list-row case-list-row">
+                <Link to={`/cases/${c.id}`} className="case-list-row-link">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: "0.9rem" }}>{c.title}</strong>
+                      {c.case_number && <span style={{ fontSize: "0.7rem", color: "var(--muted)", fontFamily: "monospace" }}>#{c.case_number}</span>}
+                    </div>
+                    <div className="meta">{c.client_name} · {c.court || "—"}</div>
                   </div>
-                  <div className="meta">{c.client_name} · {c.court || "—"}</div>
-                </div>
+                  <span style={{
+                    fontSize: "0.68rem", fontWeight: 700, padding: "0.2rem 0.6rem",
+                    borderRadius: 5, whiteSpace: "nowrap",
+                    background: ss.bg, color: ss.color,
+                  }}>{c.status}</span>
+                </Link>
 
                 <div className="case-row-actions">
                   <button
@@ -165,13 +173,7 @@ export default function Cases() {
                     {deletingId === c.id ? <span className="spinner" /> : "✕ Delete"}
                   </button>
                 </div>
-
-                <span style={{
-                  fontSize: "0.68rem", fontWeight: 700, padding: "0.2rem 0.6rem",
-                  borderRadius: 5, whiteSpace: "nowrap",
-                  background: ss.bg, color: ss.color,
-                }}>{c.status}</span>
-              </Link>
+              </div>
             );
           })
         )}

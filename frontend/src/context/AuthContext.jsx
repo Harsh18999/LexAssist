@@ -6,15 +6,15 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem("jurisai_user"));
+      return JSON.parse(localStorage.getItem("lexassist_user"));
     } catch {
       return null;
     }
   });
-  const [loading, setLoading] = useState(!!localStorage.getItem("jurisai_token"));
+  const [loading, setLoading] = useState(!!localStorage.getItem("lexassist_token"));
 
   useEffect(() => {
-    if (!localStorage.getItem("jurisai_token")) {
+    if (!localStorage.getItem("lexassist_token")) {
       setLoading(false);
       return;
     }
@@ -22,22 +22,22 @@ export function AuthProvider({ children }) {
       .me()
       .then(setUser)
       .catch(() => {
-        localStorage.removeItem("jurisai_token");
-        localStorage.removeItem("jurisai_user");
+        localStorage.removeItem("lexassist_token");
+        localStorage.removeItem("lexassist_user");
         setUser(null);
       })
       .finally(() => setLoading(false));
   }, []);
 
   function login(token, userData) {
-    localStorage.setItem("jurisai_token", token);
-    localStorage.setItem("jurisai_user", JSON.stringify(userData));
+    localStorage.setItem("lexassist_token", token);
+    localStorage.setItem("lexassist_user", JSON.stringify(userData));
     setUser(userData);
   }
 
   function logout() {
-    localStorage.removeItem("jurisai_token");
-    localStorage.removeItem("jurisai_user");
+    localStorage.removeItem("lexassist_token");
+    localStorage.removeItem("lexassist_user");
     setUser(null);
   }
 

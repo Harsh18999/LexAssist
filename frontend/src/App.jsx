@@ -12,6 +12,7 @@ import CaseDetail from "./pages/CaseDetail";
 import Research from "./pages/Research";
 import Documents from "./pages/Documents";
 import Upload from "./pages/Upload";
+import DocumentAI from "./pages/DocumentAI";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -34,6 +35,7 @@ export default function App() {
                   <Route path="/research" element={<Research />} />
                   <Route path="/chat" element={<Navigate to="/research" replace />} />
                   <Route path="/documents" element={<Documents />} />
+                  <Route path="/documents/:id/ai" element={<DocumentAI />} />
                   <Route path="/upload" element={<Upload />} />
                   {/* Redirect old routes */}
                   <Route path="/knowledge" element={<Navigate to="/documents" replace />} />

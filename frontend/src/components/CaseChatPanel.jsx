@@ -64,6 +64,13 @@ function StatusIndicator({ status }) {
     "Searching documents…": "🔍",
     "Fetching case info…": "📋",
     "Writing response…": "✍️",
+    "Searching case documents…": "📂",
+    "Searching all laws…": "⚖️",
+    "Searching BNS…": "📖",
+    "Searching BNSS…": "⚡",
+    "Searching BSA…": "🔏",
+    "Searching Constitution…": "🏛️",
+    "Searching IT Act…": "💻",
   };
   const icon = icons[status] || "🔄";
   return (
@@ -153,11 +160,11 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
   // The CASE agent behavior is triggered in the chat stream via case_id
   useEffect(() => {
     if (!caseId) return;
-    api.threads("MAIN", caseId)
+    api.threads("CASE", caseId)
       .then(async (d) => {
         let list = d.threads || [];
         if (list.length === 0) {
-          const t = await api.defaultThread("MAIN", caseId);
+          const t = await api.defaultThread("CASE", caseId);
           list = [t];
         }
         setThreads(list);
@@ -178,7 +185,7 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
     setAiStatus("");
     setHistoryLoading(true);
     try {
-      const d = await api.threadHistory(t.id, "MAIN", caseId);
+      const d = await api.threadHistory(t.id, "CASE", caseId);
       setMessages(d.messages || []);
     } catch {
       setMessages([]);
@@ -192,7 +199,7 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
     setCreating(true);
     try {
       const title = `Thread ${threads.length + 1}`;
-      const t = await api.createThread("MAIN", title, caseId);
+      const t = await api.createThread("CASE", title, caseId);
       setThreads((prev) => [t, ...prev]);
       loadThread(t);
       setShowThreadList(false);
@@ -225,10 +232,11 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
     setMessages((prev) => [...prev, userMsg]);
 
     let accumulated = "";
+    let gotDone = false;
 
     ctrlRef.current = api.streamChatV2(
       activeThread.id,
-      "MAIN",
+      "CASE",
       q,
       caseId,
       // onChunk
@@ -239,8 +247,12 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
       },
       // onDone
       (evt) => {
-        const aiMsg = { role: "assistant", content: accumulated, timestamp: new Date().toISOString() };
-        setMessages((prev) => [...prev, aiMsg]);
+        gotDone = true;
+        const finalContent = accumulated || evt.final_answer || "";
+        if (finalContent) {
+          const aiMsg = { role: "assistant", content: finalContent, timestamp: new Date().toISOString() };
+          setMessages((prev) => [...prev, aiMsg]);
+        }
         setStreamingText("");
         setAiStatus("");
         setLoading(false);
@@ -255,12 +267,19 @@ export default function CaseChatPanel({ caseId, caseTitle }) {
       },
       // onError
       (err) => {
+        if (accumulated && !gotDone) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: accumulated, timestamp: new Date().toISOString() },
+          ]);
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `⚠ ${err.message}`, timestamp: new Date().toISOString() },
+          ]);
+        }
         setStreamingText("");
         setAiStatus("");
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: `⚠ ${err.message}`, timestamp: new Date().toISOString() },
-        ]);
         setLoading(false);
       },
       // onStatus

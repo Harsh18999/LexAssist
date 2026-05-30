@@ -19,6 +19,7 @@ import os
 import logging
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
@@ -31,20 +32,27 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 S3_BUCKET = os.getenv("S3_BUCKET_NAME", "lexassist")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+# boto3 uses AWS_DEFAULT_REGION; also support AWS_REGION as fallback
+AWS_REGION = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION", "us-east-1")
 PRESIGNED_EXPIRY = int(os.getenv("S3_PRESIGNED_EXPIRY_SECONDS", "3600"))  # 1 hour
 
 # Single folder for all uploaded documents
 FOLDER_DOCUMENTS = "Documents"
+FOLDER_KNOWLEDGE = "Documents"  # alias used by document_service
+
+# SigV4 config — required for presigned URLs and all modern S3 buckets
+_S3_CONFIG = Config(signature_version="s3v4")
 
 
 def _get_client():
-    """Create and return a boto3 S3 client."""
+    """Create and return a boto3 S3 client with SigV4 and explicit regional endpoint."""
     return boto3.client(
         "s3",
         region_name=AWS_REGION,
+        endpoint_url=f"https://s3.{AWS_REGION}.amazonaws.com",
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        config=_S3_CONFIG,
     )
 
 

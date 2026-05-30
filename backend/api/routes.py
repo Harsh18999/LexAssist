@@ -5,7 +5,7 @@ import tempfile
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 100
@@ -35,6 +35,7 @@ from backend.services import (
     client_service,
     dashboard_service,
     document_service,
+    document_ai_service,
     hearing_service,
     note_service,
     workspace_service,
@@ -48,6 +49,10 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
+
+class ChatDocRequest(BaseModel):
+    query: str
+    history: list[dict] = Field(default_factory=list)
 
 class ChatRequest(BaseModel):
     query: str
@@ -139,11 +144,6 @@ class HearingRequest(BaseModel):
     court: str = ""
     description: str = ""
 
-
-# ---------------------------------------------------------------------------
-# Core
-# ---------------------------------------------------------------------------
-
 @router.get("/dashboard")
 def dashboard(user=Depends(get_current_user)):
     return dashboard_service.get_dashboard(user["id"])
@@ -215,7 +215,6 @@ def update_client(client_id: str, req: ClientUpdateRequest, user=Depends(get_cur
     activity_service.log_activity(user["id"], "Client Updated", c["name"])
     return c
 
-
 @router.delete("/clients/{client_id}")
 def delete_client(
     client_id: str,
@@ -231,11 +230,6 @@ def delete_client(
         raise HTTPException(404, "Client not found")
     activity_service.log_activity(user["id"], "Client Deleted", client_id)
     return {"ok": True, "deleted": client_id}
-
-
-# ---------------------------------------------------------------------------
-# Cases
-# ---------------------------------------------------------------------------
 
 @router.get("/cases")
 def cases(
@@ -292,11 +286,6 @@ def delete_case(case_id: str, user=Depends(get_current_user)):
     activity_service.log_activity(user["id"], "Case Deleted", case_id)
     return {"ok": True, "deleted": case_id}
 
-
-# ---------------------------------------------------------------------------
-# Documents — Upload, Download, Delete
-# ---------------------------------------------------------------------------
-
 @router.post("/upload")
 async def upload_document(file: UploadFile = File(...), user=Depends(get_current_user)):
     """Upload a standalone PDF to S3 Documents/ folder."""
@@ -350,6 +339,100 @@ def download_document(doc_id: str, user=Depends(get_current_user)):
     return {"url": url}
 
 
+@router.get("/documents/{doc_id}/status")
+def document_status_stream(doc_id: str, user=Depends(get_current_user)):
+    """
+    SSE endpoint — streams document processing status until completed or error.
+
+    Emits events:
+      data: {"status": "processing"}       <- while indexing
+      data: {"status": "completed"}        <- done; frontend stops polling
+      data: {"status": "error", "error": "..."}  <- failure
+    """
+    import time as _time
+
+    def _gen():
+        max_polls = 150      # 5 min cap (150 × 2 s)
+        poll_interval = 2.0  # seconds between DB checks
+
+        for _ in range(max_polls):
+            doc = workspace_service.get_document(user["id"], doc_id)
+            if not doc:
+                yield f'data: {{"status": "error", "error": "Document not found"}}\n\n'
+                return
+
+            status = doc.get("status", "pending")
+            err    = doc.get("processing_error") or ""
+
+            if status == "completed":
+                yield f'data: {{"status": "completed"}}\n\n'
+                return
+            elif status == "error":
+                payload = {"status": "error", "error": err}
+                import json as _json
+                yield f"data: {_json.dumps(payload)}\n\n"
+                return
+            else:
+                # still pending / processing — emit current status
+                yield f'data: {{"status": "{status}"}}\n\n'
+                _time.sleep(poll_interval)
+
+        # Timed out
+        yield f'data: {{"status": "error", "error": "Indexing timed out"}}\n\n'
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.post("/documents/{doc_id}/chat")
+async def document_chat_stream(doc_id: str, req: ChatDocRequest, user=Depends(get_current_user)):
+    """
+    Document AI endpoint — streams an LLM response sourced EXCLUSIVELY from
+    the specified document's indexed chunks in DOCUMENT_VECTOR_DB.
+
+    Request body: {"query": "What are the main claims?"}
+
+    SSE events:
+      data: {"type": "status",  "content": "Searching document…"}
+      data: {"type": "chunk",   "content": "<token>"}
+      data: {"type": "done",    "citations": [...], "response_time_sec": 1.2}
+      data: {"type": "error",   "content": "<message>"}
+    """
+    if not req.query.strip():
+        raise HTTPException(400, "Query required")
+
+    return StreamingResponse(
+        document_ai_service.stream_document_query(
+            user_id=user["id"],
+            doc_id=doc_id,
+            query=req.query.strip(),
+            history=req.history,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.get("/documents/{doc_id}")
+def get_document(doc_id: str, user=Depends(get_current_user)):
+    """Return metadata for a single document owned by the current user."""
+    doc = workspace_service.get_document(user["id"], doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found.")
+    return doc
+
+
 @router.get("/documents")
 def list_documents(
     search: str = "",
@@ -365,11 +448,6 @@ def list_documents(
         response.headers["X-Total-Count"] = str(result["total"])
     return {"documents": result["items"], **{k: result[k] for k in ("total", "page", "page_size", "total_pages")}}
 
-
-# ---------------------------------------------------------------------------
-# Thread management
-# ---------------------------------------------------------------------------
-
 @router.get("/threads")
 def list_threads(
     mode: str | None = Query(None),
@@ -380,7 +458,6 @@ def list_threads(
     threads = thread_service.list_threads(user["id"], mode, case_id)
     return {"threads": threads}
 
-
 @router.post("/threads")
 def create_thread(req: ThreadCreateRequest, user=Depends(get_current_user)):
     """Create a new chat thread."""
@@ -389,7 +466,6 @@ def create_thread(req: ThreadCreateRequest, user=Depends(get_current_user)):
     t = thread_service.create_thread(user["id"], req.mode, req.title, req.case_id)
     activity_service.log_activity(user["id"], "Thread Created", req.title)
     return t
-
 
 @router.get("/threads/default")
 def get_default_thread(
@@ -544,29 +620,15 @@ def chat(
     )
 
 
-# ---------------------------------------------------------------------------
-# Notes
-# ---------------------------------------------------------------------------
-
 @router.post("/cases/{case_id}/notes")
 def add_note(case_id: str, req: NoteRequest, user=Depends(get_current_user)):
     note = note_service.create_note(user["id"], case_id, req.content)
     activity_service.log_activity(user["id"], "Note Added", case_id)
     return note
 
-
-# ---------------------------------------------------------------------------
-# Timeline
-# ---------------------------------------------------------------------------
-
 @router.post("/cases/{case_id}/timeline")
 def add_timeline(case_id: str, req: HearingRequest, user=Depends(get_current_user)):
     return hearing_service.add_event(user["id"], case_id, req.model_dump())
-
-
-# ---------------------------------------------------------------------------
-# Misc
-# ---------------------------------------------------------------------------
 
 @router.get("/insights")
 def insights(user=Depends(get_current_user)):

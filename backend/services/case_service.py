@@ -166,8 +166,8 @@ def delete_case(user_id: str, case_id: str) -> bool:
     with get_conn() as conn:
         cur = conn.cursor()
         # Remove dependent rows first (notes, timeline)
-        cur.execute("DELETE FROM case_notes WHERE case_id = %s AND user_id = %s", (case_id, user_id))
-        cur.execute("DELETE FROM case_timeline WHERE case_id = %s AND user_id = %s", (case_id, user_id))
+        cur.execute("DELETE FROM notes WHERE case_id = %s AND user_id = %s", (case_id, user_id))
+        cur.execute("DELETE FROM hearings WHERE case_id = %s AND user_id = %s", (case_id, user_id))
         cur.execute("DELETE FROM cases WHERE id = %s AND user_id = %s", (case_id, user_id))
         cur.close()
     return True

@@ -77,6 +77,16 @@ async def get_retriever(search_kwargs: dict = None):
     )
 
 
+async def get_doc_retriever(search_kwargs: dict = None):
+    """Return a retriever backed by DOCUMENT_VECTOR_DB (case-uploaded docs)."""
+    from rag.vector_store import aget_doc_store
+    store = await aget_doc_store()
+    return store.as_retriever(
+        search_type="similarity",
+        search_kwargs=search_kwargs or {"k": 5},
+    )
+
+
 # ---------------------------------------------------------------------------
 # RAG chain
 # ---------------------------------------------------------------------------

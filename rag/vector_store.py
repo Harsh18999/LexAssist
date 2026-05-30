@@ -12,7 +12,13 @@ from langchain_aws import BedrockEmbeddings
 # ---------------------------------------------------------------------------
 
 ASYNC_DATABASE_URL = os.getenv("ASYNC_DATABASE_URL")
+
+# Statute law corpus (BNS, BNSS, BSA, CNT, IT)
 TABLE_NAME = "LEGAL_VECTOR_DB"
+
+# Case-uploaded document embeddings (filterable by document_id + case_id)
+DOC_TABLE_NAME = "DOCUMENT_VECTOR_DB"
+
 VECTOR_SIZE = 1024  # Titan Embed v2 1024-dim output
 
 # ---------------------------------------------------------------------------
@@ -32,11 +38,11 @@ pg_engine = PGEngine.from_connection_string(url=ASYNC_DATABASE_URL)
 
 
 # ---------------------------------------------------------------------------
-# Helpers: init table + get store
+# Helpers: init tables + get stores
 # ---------------------------------------------------------------------------
 
 async def ainit_table() -> None:
-    """Create the vector table in Postgres if it does not exist."""
+    """Create the LEGAL_VECTOR_DB vector table in Postgres if it does not exist."""
     await pg_engine.ainit_vectorstore_table(
         table_name=TABLE_NAME,
         vector_size=VECTOR_SIZE,
@@ -44,11 +50,29 @@ async def ainit_table() -> None:
     )
 
 
+async def ainit_doc_table() -> None:
+    """Create the DOCUMENT_VECTOR_DB vector table in Postgres if it does not exist."""
+    await pg_engine.ainit_vectorstore_table(
+        table_name=DOC_TABLE_NAME,
+        vector_size=VECTOR_SIZE,
+        overwrite=False,  # safe to call repeatedly
+    )
+
+
 async def aget_store() -> PGVectorStore:
-    """Return a ready-to-use PGVectorStore instance."""
+    """Return a ready-to-use PGVectorStore for LEGAL_VECTOR_DB (statute law)."""
     return await PGVectorStore.create(
         engine=pg_engine,
         table_name=TABLE_NAME,
+        embedding_service=_bedrock_embeddings,
+    )
+
+
+async def aget_doc_store() -> PGVectorStore:
+    """Return a ready-to-use PGVectorStore for DOCUMENT_VECTOR_DB (case documents)."""
+    return await PGVectorStore.create(
+        engine=pg_engine,
+        table_name=DOC_TABLE_NAME,
         embedding_service=_bedrock_embeddings,
     )
 
