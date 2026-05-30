@@ -8,8 +8,8 @@ export default defineConfig({
     proxy: {
       "/api": {
         // Switch to "http://127.0.0.1:8000" when running the local backend
-        // target: "https://lex-assist-4cenvys6t-harshs-projects-9878f077.vercel.app",
-        target: "http://127.0.0.1:8000",
+        target: "https://lex-assist-4cenvys6t-harshs-projects-9878f077.vercel.app",
+        // target: "http://127.0.0.1:8000",
         changeOrigin: true,
         // Required for SSE streaming — disable proxy buffering
         configure: (proxy) => {

@@ -165,7 +165,10 @@ export const api = {
     const token = getToken();
     const ctrl = new AbortController();
     fetch(`${API}/dashboard/stream`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { 
+        Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream"
+      },
       signal: ctrl.signal,
     }).then(async (res) => {
       if (!res.ok) { onError && onError(new Error(res.statusText)); return; }
@@ -311,7 +314,10 @@ export const api = {
     const token = getToken();
     const ctrl = new AbortController();
     fetch(`${API}/documents/${docId}/status`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { 
+        Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream"
+      },
       signal: ctrl.signal,
     }).then(async (res) => {
       if (!res.ok) { onDone && onDone(); return; }
@@ -364,7 +370,11 @@ export const api = {
 
     fetch(`${API}/documents/${docId}/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: { 
+        "Content-Type": "application/json", 
+        Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream"
+      },
       body: JSON.stringify({ query, history }),
       signal: ctrl.signal,
     }).then(async (res) => {
@@ -494,6 +504,7 @@ export const api = {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream"
       },
       body: JSON.stringify({
         thread_id: threadId,
@@ -559,6 +570,7 @@ export const api = {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream"
       },
       body: JSON.stringify({ query }),
       signal: ctrl.signal,
