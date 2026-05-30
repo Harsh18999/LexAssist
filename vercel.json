@@ -9,6 +9,9 @@
             }
         }
     ],
+    "env": {
+        "VERCEL_FORCE_PYTHON_STREAMING": "1"
+    },
     "routes": [
         {
             "src": "/api/(.*)",
