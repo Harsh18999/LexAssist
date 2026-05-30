@@ -4,6 +4,10 @@
   "installCommand": "npm install",
   "framework": "vite",
   "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://lexassist-1.onrender.com/api/:path*"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
